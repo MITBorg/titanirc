@@ -1,5 +1,6 @@
 mod error;
 mod server;
+mod session;
 
 use crate::{
     error::Result,

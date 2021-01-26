@@ -501,6 +501,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "paste"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5d65c4d95931acda4498f675e332fcbdc9a06705cd07086c510e9b6009cd1c1"
+
+[[package]]
 name = "percent-encoding"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -716,7 +722,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 name = "titanirc-codec"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "nom",
+ "titanirc-types",
  "tokio-util",
 ]
 
@@ -729,7 +737,18 @@ dependencies = [
  "async-stream",
  "displaydoc",
  "thiserror",
+ "titanirc-codec",
+ "titanirc-types",
  "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "titanirc-types"
+version = "0.1.0"
+dependencies = [
+ "nom",
+ "paste",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 [workspace]
 members = [
   "titanirc-server",
-  "titanirc-codec"
+  "titanirc-codec",
+  "titanirc-types"
 ]

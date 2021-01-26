@@ -23,33 +23,27 @@ macro_rules! standard_string_parser {
 }
 
 #[derive(Debug)]
-pub struct Username(String);
-
+pub struct Username(pub(crate) String);
 standard_string_parser!(Username);
 
 #[derive(Debug)]
-pub struct HostName(String);
-
+pub struct HostName(pub(crate) String);
 standard_string_parser!(HostName);
 
 #[derive(Debug)]
-pub struct ServerName(String);
-
+pub struct ServerName(pub(crate) String);
 standard_string_parser!(ServerName);
 
 #[derive(Debug)]
-pub struct RealName(String);
-
+pub struct RealName(pub(crate) String);
 standard_string_parser!(RealName);
 
 #[derive(Debug)]
-pub struct Nick(String);
-
+pub struct Nick(pub(crate) String);
 standard_string_parser!(Nick);
 
 #[derive(Debug)]
-pub struct Channel(String);
-
+pub struct Channel(pub(crate) String);
 standard_string_parser!(Channel);
 
 #[derive(Debug)]
@@ -73,7 +67,7 @@ impl PrimitiveParser for Receiver {
 }
 
 #[derive(Debug)]
-pub struct Message(String);
+pub struct Message(pub(crate) String);
 
 impl PrimitiveParser for Message {
     fn parse(bytes: &[u8]) -> IResult<&[u8], Self> {

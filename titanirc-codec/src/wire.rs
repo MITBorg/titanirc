@@ -11,19 +11,18 @@ impl FrameDecoder for Decoder {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let length = match find_crlf(src) {
-            Some(len) => len,
-            None => {
-                if src.len() > MAX_LENGTH {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("Frame of length {} is too large.", src.len()),
-                    ));
-                }
-
-                // tell Framed we need more bytes
-                return Ok(None);
+        let length = if let Some(len) = find_crlf(src) {
+            len
+        } else {
+            if src.len() > MAX_LENGTH {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Frame of length {} is too large.", src.len()),
+                ));
             }
+
+            // tell Framed we need more bytes
+            return Ok(None);
         };
 
         let bytes = src.copy_to_bytes(length + 1);

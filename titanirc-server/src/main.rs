@@ -1,3 +1,6 @@
+#![deny(clippy::pedantic)]
+#![allow(clippy::missing_errors_doc)]
+
 mod error;
 mod server;
 mod session;

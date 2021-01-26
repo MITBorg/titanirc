@@ -9,7 +9,7 @@ impl Actor for Session {
 
 impl StreamHandler<Result<Command, std::io::Error>> for Session {
     /// This is main event loop for client requests
-    fn handle(&mut self, cmd: Result<Command, std::io::Error>, ctx: &mut Self::Context) {
+    fn handle(&mut self, cmd: Result<Command, std::io::Error>, _ctx: &mut Self::Context) {
         match cmd {
             Ok(cmd) => println!("cmd: {:?}", cmd),
             Err(e) => eprintln!("error decoding: {}", e),

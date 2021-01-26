@@ -1,3 +1,6 @@
+#![deny(clippy::pedantic)]
+#![allow(clippy::missing_errors_doc)]
+
 mod primitives;
 
 pub use crate::primitives::*;
@@ -16,13 +19,11 @@ macro_rules! define_commands {
                 $([<$name:camel>]([<$name:camel Command>])),*
             }
 
+            $(const [<$name _BYTES>]: &[u8] = stringify!($name).as_bytes();)*
+
             impl Command {
                 pub fn parse(input: &[u8]) -> Result<Option<Self>, nom::Err<nom::error::Error<&[u8]>>> {
                     let (rest, kind) = nom::bytes::complete::take_till(|c| c == b' ')(input)?;
-
-                    $(const [<$name _BYTES>]: &[u8] = stringify!($name).as_bytes();)*
-
-                    eprintln!("kind: {:?}", std::str::from_utf8(kind));
 
                     match kind {
                         $([<$name _BYTES>] => Ok(Some(Self::[<$name:camel>]([<$name:camel Command>]::parse(rest)?)))),*,
@@ -38,6 +39,7 @@ macro_rules! define_commands {
                 }
 
                 impl [<$name:camel Command>] {
+                    #[allow(unused_variables)]
                     pub fn parse(rest: &[u8]) -> Result<Self, nom::Err<nom::error::Error<&[u8]>>> {
                         $(
                             $(
@@ -71,4 +73,25 @@ define_commands! {
     JOIN(Channel),
 
     PRIVMSG(Receiver, Message),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Command;
+
+    #[test]
+    fn parse_empty() {
+        assert!(matches!(Command::parse(b""), Ok(None)));
+    }
+
+    #[test]
+    fn parse_privmsg() {
+        assert!(matches!(
+            Command::parse(b"PRIVMSG foo :baz"),
+            Ok(Some(Command::Privmsg(super::PrivmsgCommand {
+                receiver: super::Receiver::User(super::Nick(nick)),
+                message: super::Message(msg),
+            }))) if nick == "foo" && msg == ":baz"
+        ))
+    }
 }

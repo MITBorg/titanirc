@@ -23,7 +23,7 @@ impl Handler<Connection> for Server {
         println!("Accepted connection from {}", remote);
 
         Session::create(move |ctx| {
-            let (read, write) = tokio::io::split(stream);
+            let (read, _write) = tokio::io::split(stream);
             Session::add_stream(FramedRead::new(read, titanirc_codec::Decoder), ctx);
             Session {}
         });

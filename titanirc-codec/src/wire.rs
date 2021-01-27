@@ -27,6 +27,8 @@ impl FrameDecoder for Decoder {
 
         let bytes = src.copy_to_bytes(length + 1);
 
+        eprintln!("{:?}", std::str::from_utf8(&bytes[..bytes.len() - 2]));
+
         match Command::parse(&bytes[..bytes.len() - 2]) {
             Ok(Some(msg)) => Ok(Some(msg)),
             Ok(None) => Err(std::io::Error::new(
@@ -38,6 +40,22 @@ impl FrameDecoder for Decoder {
                 err.to_string(),
             )),
         }
+    }
+}
+
+pub struct Encoder;
+
+impl tokio_util::codec::Encoder<titanirc_types::ServerMessage> for Encoder {
+    type Error = std::io::Error;
+
+    fn encode(
+        &mut self,
+        item: titanirc_types::ServerMessage,
+        dst: &mut BytesMut,
+    ) -> Result<(), Self::Error> {
+        item.write("my.cool.server", "jordan", dst);
+        dst.extend_from_slice(b"\r\n");
+        Ok(())
     }
 }
 

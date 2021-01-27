@@ -3,4 +3,4 @@
 
 mod wire;
 
-pub use crate::wire::Decoder;
+pub use crate::wire::{Decoder, Encoder};

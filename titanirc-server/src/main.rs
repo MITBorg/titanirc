@@ -5,8 +5,6 @@ mod entities;
 mod error;
 mod server;
 
-use std::collections::HashMap;
-
 use crate::{
     error::Result,
     server::{Connection, Server},
@@ -29,6 +27,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(InitError::TcpBind)?;
 
+    // connection acceptor loop
     let stream = async_stream::stream! {
         loop {
             match listener.accept().await {
@@ -38,11 +37,10 @@ async fn main() -> Result<()> {
         }
     };
 
+    // Spawn the server and pass connections from `stream` to `Handler<Connection>`.
     Server::create(move |ctx| {
         ctx.add_message_stream(stream);
-        Server {
-            channels: HashMap::new(),
-        }
+        Server::new()
     });
 
     println!("Running IRC server on 0.0.0.0:6667");

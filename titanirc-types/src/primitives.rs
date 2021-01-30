@@ -1,17 +1,19 @@
+use bytes::Bytes;
 use derive_more::{Deref, From};
 use nom::{
     bytes::complete::{tag, take_till},
-    combinator::{iterator, map_res},
+    combinator::{iterator},
     sequence::terminated,
     IResult,
 };
+use nom_bytes::BytesWrapper;
 
 pub trait ValidatingParser {
     fn validate(bytes: &[u8]) -> bool;
 }
 
 pub trait PrimitiveParser {
-    fn parse(bytes: &[u8]) -> IResult<&[u8], Self>
+    fn parse(bytes: BytesWrapper) -> IResult<BytesWrapper, Self>
     where
         Self: Sized;
 }
@@ -29,15 +31,22 @@ macro_rules! noop_validator {
 macro_rules! free_text_primitive {
     ($name:ty) => {
         impl PrimitiveParser for $name {
-            fn parse(bytes: &[u8]) -> IResult<&[u8], Self> {
-                let (rest, _) = tag(b":")(bytes)?;
-                Ok((&[], Self(std::str::from_utf8(rest).unwrap().to_string())))
+            fn parse(bytes: BytesWrapper) -> IResult<BytesWrapper, Self> {
+                let (rest, _) = tag(":".as_bytes())(bytes)?;
+                Ok((Bytes::new().into(), Self(rest.into())))
             }
         }
 
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(&self.0)
+                match std::str::from_utf8(&self.0[..]) {
+                    Ok(v) => f.write_str(v),
+                    Err(_e) => {
+                        // todo: report this better
+                        eprintln!("Invalid utf-8 in {}", stringify!($name));
+                        Err(std::fmt::Error)
+                    }
+                }
             }
         }
     };
@@ -46,24 +55,30 @@ macro_rules! free_text_primitive {
 macro_rules! space_terminated_primitive {
     ($name:ty) => {
         impl PrimitiveParser for $name {
-            fn parse(bytes: &[u8]) -> IResult<&[u8], Self> {
-                let (rest, val) = map_res(take_till(|c| c == b' '), std::str::from_utf8)(bytes)?;
+            fn parse(bytes: BytesWrapper) -> IResult<BytesWrapper, Self> {
+                let (rest, val) = take_till(|c| c == b' ')(bytes.clone())?;
 
-                if !<Self as ValidatingParser>::validate(val.as_bytes()) {
+                if !<Self as ValidatingParser>::validate(&val[..]) {
                     return Err(nom::Err::Failure(nom::error::Error::new(
                         bytes,
                         nom::error::ErrorKind::Verify,
                     )));
                 }
 
-                // TODO: don't clone
-                Ok((rest, Self(val.to_string())))
+                Ok((rest, Self(val.into())))
             }
         }
 
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(&self.0)
+                match std::str::from_utf8(&self.0[..]) {
+                    Ok(v) => f.write_str(v),
+                    Err(_e) => {
+                        // todo: report this better
+                        eprintln!("Invalid utf-8 in {}", stringify!($name));
+                        Err(std::fmt::Error)
+                    }
+                }
             }
         }
     };
@@ -122,32 +137,32 @@ impl ValidatingParser for Special {
 }
 
 #[derive(Debug, Deref, From)]
-pub struct Username(pub String);
+pub struct Username(pub Bytes);
 space_terminated_primitive!(Username);
 noop_validator!(Username);
 
 #[derive(Debug, Deref, From)]
-pub struct Mode(pub String);
+pub struct Mode(pub Bytes);
 space_terminated_primitive!(Mode);
 noop_validator!(Mode);
 
 #[derive(Debug, Deref, From)]
-pub struct HostName(pub String);
+pub struct HostName(pub Bytes);
 space_terminated_primitive!(HostName);
 noop_validator!(HostName);
 
 #[derive(Debug, Deref, From)]
-pub struct ServerName(pub String);
+pub struct ServerName(pub Bytes);
 space_terminated_primitive!(ServerName);
 noop_validator!(ServerName);
 
 #[derive(Debug, Deref, From)]
-pub struct RealName(pub String);
+pub struct RealName(pub Bytes);
 space_terminated_primitive!(RealName);
 noop_validator!(RealName);
 
 #[derive(Debug, Deref, From)]
-pub struct Nick(pub String);
+pub struct Nick(pub Bytes);
 space_terminated_primitive!(Nick);
 
 // TODO: i feel like this would be better suited as a nom chomper to stop
@@ -169,12 +184,12 @@ impl ValidatingParser for Nick {
 }
 
 #[derive(Debug, Deref, From)]
-pub struct Channel(pub String);
+pub struct Channel(pub Bytes);
 space_terminated_primitive!(Channel);
 noop_validator!(Channel);
 
 #[derive(Debug, Deref, From)]
-pub struct FreeText(pub String);
+pub struct FreeText(pub Bytes);
 free_text_primitive!(FreeText);
 noop_validator!(FreeText);
 
@@ -183,12 +198,13 @@ pub struct Nicks(pub Vec<Nick>);
 space_delimited_display!(Nicks);
 
 impl PrimitiveParser for Nicks {
-    fn parse(bytes: &[u8]) -> IResult<&[u8], Self> {
-        let mut it = iterator(bytes, terminated(take_till(|c| c == b' '), tag(b" ")));
+    fn parse(bytes: BytesWrapper) -> IResult<BytesWrapper, Self> {
+        let mut it = iterator(
+            bytes,
+            terminated(take_till(|c| c == b' '), tag(" ".as_bytes())),
+        );
 
-        let parsed = it
-            .map(|v| Nick(std::str::from_utf8(v).unwrap().to_string()))
-            .collect();
+        let parsed = it.map(|v| Nick(v.into())).collect();
 
         it.finish()
             .map(move |(remaining, _)| (remaining, Self(parsed)))
@@ -245,20 +261,20 @@ pub enum Receiver {
 }
 
 impl std::ops::Deref for Receiver {
-    type Target = String;
+    type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        match self {
+        std::str::from_utf8(match self {
             Self::User(nick) => &*nick,
             Self::Channel(channel) => &*channel,
-        }
+        })
+        .unwrap()
     }
 }
 
 impl PrimitiveParser for Receiver {
-    fn parse(bytes: &[u8]) -> IResult<&[u8], Self> {
-        if let Ok((_, _)) = nom::bytes::complete::tag::<_, _, nom::error::Error<&[u8]>>("#")(bytes)
-        {
+    fn parse(bytes: BytesWrapper) -> IResult<BytesWrapper, Self> {
+        if bytes.get(0) == Some(&b'#') {
             let (rest, channel) = Channel::parse(bytes)?;
             Ok((rest, Self::Channel(channel)))
         } else {

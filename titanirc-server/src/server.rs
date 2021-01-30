@@ -3,12 +3,26 @@ use crate::entities::{channel::Channel, user::User};
 use std::{collections::HashMap, net::SocketAddr};
 
 use actix::{io::FramedWrite, prelude::*};
-use futures_util::future::TryFutureExt;
 use tokio::net::TcpStream;
 use tokio_util::codec::FramedRead;
 
+/// The core of our server:
+///
+/// - Handles incoming connections and spawns `User` actors for each.
+/// - Handles channel creation, access control, operator config, etc.
+///
+/// Essentially acts as the middleman for each entity communicating with each other.
 pub struct Server {
+    /// A list of known channels and the addresses to them.
     pub channels: HashMap<String, Addr<Channel>>,
+}
+
+impl Server {
+    pub fn new() -> Self {
+        Self {
+            channels: HashMap::new(),
+        }
+    }
 }
 
 impl Actor for Server {
@@ -19,6 +33,9 @@ impl Actor for Server {
 #[rtype(result = "()")]
 pub struct Connection(pub TcpStream, pub SocketAddr);
 
+/// Handles incoming connections from our connection acceptor loop and spawns
+/// a `User` actor for each which handles reading from the socket and acting
+/// accordingly.
 impl Handler<Connection> for Server {
     type Result = ();
 
@@ -27,37 +44,39 @@ impl Handler<Connection> for Server {
 
         User::create(move |ctx| {
             let (read, write) = tokio::io::split(stream);
-            User::add_stream(FramedRead::new(read, titanirc_codec::Decoder), ctx);
-            User {
-                server: server_ctx.address(),
-                writer: FramedWrite::new(write, titanirc_codec::Encoder, ctx),
-                last_active: std::time::Instant::now(),
-                nick: None,
-            }
+            let read = FramedRead::new(read, titanirc_codec::Decoder);
+            let write = FramedWrite::new(write, titanirc_codec::Encoder, ctx);
+
+            // Make our new `User` handle all events from this socket in `StreamHandler<Result<Command, _>>`.
+            ctx.add_stream(read);
+
+            User::new(server_ctx.address(), write)
         });
     }
 }
 
+/// Send by `User` actors to arbitrate access to the requested channel.
 impl Handler<crate::entities::channel::events::Join> for Server {
     type Result = ResponseActFuture<Self, crate::entities::channel::events::JoinResult>;
 
     fn handle(
         &mut self,
         msg: crate::entities::channel::events::Join,
-        ctx: &mut Self::Context,
+        _ctx: &mut Self::Context,
     ) -> Self::Result {
+        // get the channel or create it if it doesn't already exist
+        #[allow(clippy::option_if_let_else)]
         let channel = if let Some(channel) = self.channels.get(&msg.channel_name) {
             channel
         } else {
-            let channel = Channel::create(|ctx| Channel {
-                members: Default::default(),
-            });
+            let channel = Channel::create(|_ctx| Channel::new());
 
             self.channels
                 .entry(msg.channel_name.clone())
                 .or_insert(channel)
         };
 
+        // forward the user's join event onto the channel
         Box::pin(
             channel
                 .send(msg)

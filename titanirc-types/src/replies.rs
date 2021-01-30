@@ -1,3 +1,5 @@
+#![allow(clippy::wildcard_imports)]
+
 use crate::{primitives::*, Command};
 use std::fmt::Write;
 
@@ -30,7 +32,7 @@ impl ServerMessage {
             Self::Pong => write!(dst, "PONG :{}", server_name),
             Self::Command(source, command) => {
                 let source = match &source {
-                    Source::User(nick) => nick.as_str(),
+                    Source::User(nick) => std::str::from_utf8(nick).unwrap(),
                     Source::Server => server_name,
                 };
                 write!(dst, ":{} {}", source, command)

@@ -7,15 +7,17 @@ mod replies;
 pub use crate::primitives::*;
 pub use crate::replies::{Reply, ServerMessage, Source};
 
+use bytes::Bytes;
 use nom::{
     bytes::complete::{tag, take_till},
     error::Error as NomError,
 };
+use nom_bytes::BytesWrapper;
 
-fn parse_optional_source(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
-    let (rest, _) = tag(":")(input)?;
+fn parse_optional_source(input: BytesWrapper) -> nom::IResult<BytesWrapper, BytesWrapper> {
+    let (rest, _) = tag(":".as_bytes())(input)?;
     let (rest, _) = take_till(|c| c == b' ')(rest)?;
-    tag(" ")(rest)
+    tag(" ".as_bytes())(rest)
 }
 
 macro_rules! define_commands {
@@ -35,19 +37,20 @@ macro_rules! define_commands {
             $(const [<$name _BYTES>]: &[u8] = stringify!($name).as_bytes();)*
 
             impl Command {
-                pub fn parse(input: &[u8]) -> Result<Option<Self>, nom::Err<NomError<&[u8]>>> {
+                pub fn parse(input: Bytes) -> Result<Option<Self>, nom::Err<NomError<BytesWrapper>>> {
+                    let input = BytesWrapper::from(input);
+
                     // skip the optional source at the start of the message
-                    let rest = if let Ok((rest, _)) = parse_optional_source(input) {
-                        rest
+                    let input = if let Ok((input, _)) = parse_optional_source(input.clone()) {
+                        input
                     } else {
                         input
                     };
 
-                    let (rest, kind) = take_till(|c| c == b' ')(rest)?;
+                    let (params, command) = take_till(|c| c == b' ')(input)?;
 
-                    // fix this shit
-                    match std::str::from_utf8(kind).unwrap().to_uppercase().as_bytes() {
-                        $([<$name _BYTES>] => Ok(Some(Self::[<$name:camel>]([<$name:camel Command>]::parse(rest)?)))),*,
+                    match command.to_ascii_uppercase().as_ref() {
+                        $([<$name _BYTES>] => Ok(Some(Self::[<$name:camel>]([<$name:camel Command>]::parse(params)?)))),*,
                         _ => Ok(None)
                     }
                 }
@@ -69,10 +72,10 @@ macro_rules! define_commands {
 
                 impl [<$name:camel Command>] {
                     #[allow(unused_variables)]
-                    pub fn parse(rest: &[u8]) -> Result<Self, nom::Err<nom::error::Error<&[u8]>>> {
+                    pub fn parse(rest: BytesWrapper) -> Result<Self, nom::Err<nom::error::Error<BytesWrapper>>> {
                         $(
                             $(
-                                let (rest, _) = tag(" ")(rest)?;
+                                let (rest, _) = tag(" ".as_bytes())(rest)?;
                                 let (rest, [<$param:snake>]) = $param::parse(rest)?;
                             )*
                         )*
@@ -95,6 +98,12 @@ macro_rules! define_commands {
                         )*
 
                         Ok(())
+                    }
+                }
+
+                impl Into<Command> for [<$name:camel Command>] {
+                    fn into(self) -> Command {
+                        Command::[<$name:camel>](self)
                     }
                 }
             )*
@@ -126,16 +135,17 @@ define_commands! {
 #[cfg(test)]
 mod tests {
     use super::Command;
+    use bytes::Bytes;
 
     #[test]
     fn parse_empty() {
-        assert!(matches!(Command::parse(b""), Ok(None)));
+        assert!(matches!(Command::parse(Bytes::from_static(b"")), Ok(None)));
     }
 
     #[test]
     fn parse_privmsg() {
         assert!(matches!(
-            Command::parse(b"PRIVMSG foo :baz"),
+            Command::parse(Bytes::from_static(b"PRIVMSG foo :baz")),
             Ok(Some(Command::Privmsg(super::PrivmsgCommand {
                 receiver: super::Receiver::User(super::Nick(nick)),
                 free_text: super::primitives::FreeText(msg),
@@ -145,13 +155,8 @@ mod tests {
 
     #[test]
     fn parse_privmsg_opt_source() {
-        eprintln!(
-            "{:?}",
-            Command::parse(b":some-fake-source!dude@nice PRIVMSG foo :baz")
-        );
-
         assert!(matches!(
-            Command::parse(b":some-fake-source!dude@nice PRIVMSG foo :baz"),
+            Command::parse(Bytes::from_static(b":some-fake-source!dude@nice PRIVMSG foo :baz")),
             Ok(Some(Command::Privmsg(super::PrivmsgCommand {
                 receiver: super::Receiver::User(super::Nick(nick)),
                 free_text: super::primitives::FreeText(msg),

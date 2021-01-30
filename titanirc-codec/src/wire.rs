@@ -1,4 +1,4 @@
-use bytes::{Buf, BytesMut};
+use bytes::{BytesMut};
 use titanirc_types::Command;
 use tokio_util::codec::Decoder as FrameDecoder;
 
@@ -25,11 +25,15 @@ impl FrameDecoder for Decoder {
             return Ok(None);
         };
 
-        let bytes = src.copy_to_bytes(length + 1);
+        let bytes = {
+            let mut b = src.split_to(length + 1);
+            b.truncate(b.len() - 2); // remove the crlf at the end of the buffer
+            b.freeze()
+        };
 
-        eprintln!("{:?}", std::str::from_utf8(&bytes[..bytes.len() - 2]));
+        eprintln!("{:?}", std::str::from_utf8(&bytes[..]));
 
-        match Command::parse(&bytes[..bytes.len() - 2]) {
+        match Command::parse(bytes) {
             Ok(Some(msg)) => Ok(Some(msg)),
             Ok(None) => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,

@@ -1,57 +1,30 @@
-use std::sync::Arc;
+pub mod events;
 
 use actix::prelude::*;
+use std::sync::Arc;
 
-use crate::{entities::user::User, server::Server};
+use crate::entities::user::User;
 
-pub mod events {
-    use crate::entities::user::User;
-    use actix::prelude::*;
-
-    pub type JoinResult = Result<super::Handle, JoinError>;
-
-    #[derive(Message)]
-    #[rtype(result = "JoinResult")]
-    pub struct Join {
-        pub channel_name: String,
-        pub nick: String,
-        pub user: Addr<User>,
-    }
-
-    #[derive(Debug, thiserror::Error, displaydoc::Display)]
-    pub enum JoinError {
-        /// Failed to send join request to channel: {0}
-        Mailbox(#[from] actix::MailboxError),
-    }
-
-    #[derive(Message)]
-    #[rtype(result = "")]
-    pub struct JoinBroadcast {
-        pub channel_name: String,
-        pub nick: String,
-    }
-
-    impl From<Join> for JoinBroadcast {
-        fn from(
-            Join {
-                channel_name, nick, ..
-            }: Join,
-        ) -> Self {
-            Self { channel_name, nick }
-        }
-    }
-}
-
+/// A handle to this `Channel` that `User` actors can use to communicate with the
+/// rest of the channel.
 pub struct Handle {
     //pub name_change: actix::Recipient<super::user::events::NameChange>,
     pub message: actix::Recipient<super::common_events::Message>,
 }
 
+/// An IRC channel.
 pub struct Channel {
     pub members: Vec<Addr<User>>,
 }
 
 impl Channel {
+    pub fn new() -> Self {
+        Self {
+            members: Vec::new(),
+        }
+    }
+
+    /// Announce a user's join event to the rest of the channel.
     fn announce_join(&self, join: events::Join) -> impl Future<Output = ()> {
         let mut futures = Vec::new();
 
@@ -90,8 +63,8 @@ impl actix::Handler<super::common_events::Message> for Channel {
 
     fn handle(
         &mut self,
-        msg: super::common_events::Message,
-        ctx: &mut Self::Context,
+        _msg: super::common_events::Message,
+        _ctx: &mut Self::Context,
     ) -> Self::Result {
     }
 }

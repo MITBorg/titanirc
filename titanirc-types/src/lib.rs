@@ -5,7 +5,7 @@ mod primitives;
 mod replies;
 
 pub use crate::primitives::*;
-pub use crate::replies::{Reply, ServerMessage};
+pub use crate::replies::{Reply, ServerMessage, Source};
 
 use nom::{
     bytes::complete::{tag, take_till},

@@ -1,9 +1,11 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)]
 
+mod entities;
 mod error;
 mod server;
-mod session;
+
+use std::collections::HashMap;
 
 use crate::{
     error::Result,
@@ -38,7 +40,9 @@ async fn main() -> Result<()> {
 
     Server::create(move |ctx| {
         ctx.add_message_stream(stream);
-        Server {}
+        Server {
+            channels: HashMap::new(),
+        }
     });
 
     println!("Running IRC server on 0.0.0.0:6667");

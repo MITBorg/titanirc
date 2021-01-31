@@ -1,7 +1,9 @@
-use std::time::Instant;
+use std::{ops::Deref, time::Instant};
 
 use actix::{Actor, AsyncContext, StreamHandler, WrapFuture};
-use titanirc_types::{Command, JoinCommand, ModeCommand, MotdCommand, NickCommand, VersionCommand};
+use titanirc_types::{
+    Command, JoinCommand, ModeCommand, MotdCommand, NickCommand, PrivmsgCommand, VersionCommand,
+};
 
 pub trait CommandHandler<T>: Actor {
     fn handle_cmd(&mut self, command: T, ctx: &mut Self::Context);
@@ -16,6 +18,7 @@ impl StreamHandler<Result<Command, std::io::Error>> for super::User {
             Ok(Command::Join(v)) => self.handle_cmd(v, ctx),
             Ok(Command::Mode(v)) => self.handle_cmd(v, ctx),
             Ok(Command::Motd(v)) => self.handle_cmd(v, ctx),
+            Ok(Command::Privmsg(v)) => self.handle_cmd(v, ctx),
             Ok(Command::Version(v)) => self.handle_cmd(v, ctx),
             Ok(Command::Pong(_)) => {}
             Ok(cmd) => println!("cmd: {:?}", cmd),
@@ -109,5 +112,33 @@ impl CommandHandler<VersionCommand> for super::User {
             )
             .into(),
         )
+    }
+}
+
+impl CommandHandler<PrivmsgCommand> for super::User {
+    fn handle_cmd(
+        &mut self,
+        PrivmsgCommand {
+            receiver,
+            free_text,
+        }: PrivmsgCommand,
+        ctx: &mut Self::Context,
+    ) {
+        if let Some(nick) = &self.nick {
+            let msg = crate::entities::common_events::Message {
+                from: nick.clone(), // TODO: this need to be a full user string i think
+                to: receiver.to_string(),
+                message: free_text.to_string(),
+            };
+
+            let server_addr = self.server.clone();
+
+            ctx.spawn(
+                async move {
+                    server_addr.send(msg).await.unwrap();
+                }
+                .into_actor(self),
+            );
+        }
     }
 }

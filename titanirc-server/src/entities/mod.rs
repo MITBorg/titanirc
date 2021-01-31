@@ -5,9 +5,10 @@ pub mod common_events {
     use actix::prelude::*;
 
     #[derive(Debug, Message)]
-    #[rtype(result = "()")]
+    #[rtype(result = "")]
     pub struct Message {
-        from: String,
-        message: String,
+        pub from: String,
+        pub to: String,
+        pub message: String,
     }
 }

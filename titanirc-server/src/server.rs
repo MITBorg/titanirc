@@ -55,7 +55,7 @@ impl Handler<Connection> for Server {
     }
 }
 
-/// Send by `User` actors to arbitrate access to the requested channel.
+/// Sent by `User` actors to arbitrate access to the requested channel.
 impl Handler<crate::entities::channel::events::Join> for Server {
     type Result = ResponseActFuture<Self, crate::entities::channel::events::JoinResult>;
 
@@ -83,5 +83,26 @@ impl Handler<crate::entities::channel::events::Join> for Server {
                 .into_actor(self)
                 .map(|v, _, _| v.map_err(|e| e.into()).and_then(|v| v)),
         )
+    }
+}
+
+impl Handler<crate::entities::common_events::Message> for Server {
+    type Result = ();
+
+    fn handle(
+        &mut self,
+        msg: crate::entities::common_events::Message,
+        ctx: &mut Self::Context,
+    ) -> Self::Result {
+        eprintln!("to: {}", msg.to);
+
+        let channel = self.channels.get(&msg.to).unwrap().clone();
+
+        ctx.spawn(
+            async move {
+                channel.send(msg).await.unwrap();
+            }
+            .into_actor(self),
+        );
     }
 }

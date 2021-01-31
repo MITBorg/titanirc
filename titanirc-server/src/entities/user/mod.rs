@@ -3,14 +3,16 @@ pub mod events;
 
 use crate::{entities::channel::events::JoinBroadcast, server::Server};
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use actix::{
     io::{FramedWrite, WriteHandler},
     prelude::*,
 };
 use std::time::{Duration, Instant};
-use titanirc_types::{Channel, JoinCommand, ServerMessage, Source};
+use titanirc_types::{
+    Channel, FreeText, JoinCommand, PrivmsgCommand, Receiver, ServerMessage, Source,
+};
 use tokio::{io::WriteHalf, net::TcpStream};
 
 pub struct User {
@@ -71,6 +73,27 @@ impl actix::Handler<Arc<JoinBroadcast>> for User {
             Source::User(bytes::Bytes::from(msg.nick.as_bytes().to_owned()).into()),
             JoinCommand {
                 channel: Channel::from(bytes::Bytes::from(msg.channel_name.as_bytes().to_owned())),
+            }
+            .into(),
+        ));
+    }
+}
+
+impl actix::Handler<Arc<crate::entities::common_events::Message>> for User {
+    type Result = ();
+
+    fn handle(
+        &mut self,
+        msg: Arc<crate::entities::common_events::Message>,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.writer.write(ServerMessage::Command(
+            Source::User(bytes::Bytes::from(msg.from.as_bytes().to_owned()).into()),
+            PrivmsgCommand {
+                free_text: FreeText(bytes::Bytes::from(msg.message.as_bytes().to_owned())),
+                receiver: {
+                    Receiver::Channel(bytes::Bytes::from(msg.to.as_bytes().to_owned()).into())
+                },
             }
             .into(),
         ));

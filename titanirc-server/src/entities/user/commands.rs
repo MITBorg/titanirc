@@ -1,4 +1,4 @@
-use std::{ops::Deref, time::Instant};
+use std::time::Instant;
 
 use actix::{Actor, AsyncContext, StreamHandler, WrapFuture};
 use titanirc_types::{
@@ -9,8 +9,8 @@ pub trait CommandHandler<T>: Actor {
     fn handle_cmd(&mut self, command: T, ctx: &mut Self::Context);
 }
 
-impl StreamHandler<Result<Command, std::io::Error>> for super::User {
-    fn handle(&mut self, cmd: Result<Command, std::io::Error>, ctx: &mut Self::Context) {
+impl StreamHandler<Result<Command<'static>, std::io::Error>> for super::User {
+    fn handle(&mut self, cmd: Result<Command<'static>, std::io::Error>, ctx: &mut Self::Context) {
         self.last_active = Instant::now();
 
         match cmd {
@@ -30,8 +30,12 @@ impl StreamHandler<Result<Command, std::io::Error>> for super::User {
 // TODO: all the 'raw' writes using byte strings below probably need to
 //  be wrapped in something a bit more friendly.
 
-impl CommandHandler<NickCommand> for super::User {
-    fn handle_cmd(&mut self, NickCommand { nick }: NickCommand, _ctx: &mut Self::Context) {
+impl CommandHandler<NickCommand<'static>> for super::User {
+    fn handle_cmd(
+        &mut self,
+        NickCommand { nick, .. }: NickCommand<'static>,
+        _ctx: &mut Self::Context,
+    ) {
         self.writer.write(titanirc_types::Reply::RplWelcome.into());
         self.writer.write(titanirc_types::Reply::RplYourHost.into());
         self.writer.write(titanirc_types::Reply::RplCreated.into());
@@ -44,8 +48,12 @@ impl CommandHandler<NickCommand> for super::User {
     }
 }
 
-impl CommandHandler<JoinCommand> for super::User {
-    fn handle_cmd(&mut self, JoinCommand { channel }: JoinCommand, ctx: &mut Self::Context) {
+impl CommandHandler<JoinCommand<'static>> for super::User {
+    fn handle_cmd(
+        &mut self,
+        JoinCommand { channel, .. }: JoinCommand<'static>,
+        ctx: &mut Self::Context,
+    ) {
         if let Some(ref nick) = self.nick {
             let server_addr = self.server.clone();
             let ctx_addr = ctx.address();
@@ -71,34 +79,42 @@ impl CommandHandler<JoinCommand> for super::User {
     }
 }
 
-impl CommandHandler<ModeCommand> for super::User {
-    fn handle_cmd(&mut self, ModeCommand { mode, .. }: ModeCommand, _ctx: &mut Self::Context) {
+impl CommandHandler<ModeCommand<'static>> for super::User {
+    fn handle_cmd(
+        &mut self,
+        ModeCommand { mode, .. }: ModeCommand<'static>,
+        _ctx: &mut Self::Context,
+    ) {
         self.writer
             .write(titanirc_types::Reply::RplUmodeIs(mode).into())
     }
 }
 
-impl CommandHandler<MotdCommand> for super::User {
-    fn handle_cmd(&mut self, _command: MotdCommand, _ctx: &mut Self::Context) {
+impl CommandHandler<MotdCommand<'static>> for super::User {
+    fn handle_cmd(&mut self, _command: MotdCommand<'static>, _ctx: &mut Self::Context) {
         static SERVER_NAME: bytes::Bytes = bytes::Bytes::from_static(b"my.test.server");
         static MOTD1: bytes::Bytes = bytes::Bytes::from_static(b"Hello, welcome to this server!");
         static MOTD2: bytes::Bytes = bytes::Bytes::from_static(b"it's very cool!");
 
         self.writer.write(
-            titanirc_types::Reply::RplMotdStart(titanirc_types::ServerName(SERVER_NAME.clone()))
-                .into(),
+            titanirc_types::Reply::RplMotdStart(titanirc_types::ServerName(
+                SERVER_NAME.clone().into(),
+            ))
+            .into(),
         );
-        self.writer
-            .write(titanirc_types::Reply::RplMotd(titanirc_types::FreeText(MOTD1.clone())).into());
-        self.writer
-            .write(titanirc_types::Reply::RplMotd(titanirc_types::FreeText(MOTD2.clone())).into());
+        self.writer.write(
+            titanirc_types::Reply::RplMotd(titanirc_types::FreeText(MOTD1.clone().into())).into(),
+        );
+        self.writer.write(
+            titanirc_types::Reply::RplMotd(titanirc_types::FreeText(MOTD2.clone().into())).into(),
+        );
         self.writer
             .write(titanirc_types::Reply::RplEndOfMotd.into());
     }
 }
 
-impl CommandHandler<VersionCommand> for super::User {
-    fn handle_cmd(&mut self, _command: VersionCommand, _ctx: &mut Self::Context) {
+impl CommandHandler<VersionCommand<'static>> for super::User {
+    fn handle_cmd(&mut self, _command: VersionCommand<'static>, _ctx: &mut Self::Context) {
         static SERVER_NAME: bytes::Bytes = bytes::Bytes::from_static(b"my.test.server");
         static INFO: bytes::Bytes =
             bytes::Bytes::from_static(b"https://github.com/MITBorg/titanirc");
@@ -107,21 +123,22 @@ impl CommandHandler<VersionCommand> for super::User {
             titanirc_types::Reply::RplVersion(
                 clap::crate_version!().to_string(),
                 "release".to_string(),
-                titanirc_types::ServerName(SERVER_NAME.clone()),
-                titanirc_types::FreeText(INFO.clone()),
+                titanirc_types::ServerName(SERVER_NAME.clone().into()),
+                titanirc_types::FreeText(INFO.clone().into()),
             )
             .into(),
         )
     }
 }
 
-impl CommandHandler<PrivmsgCommand> for super::User {
+impl CommandHandler<PrivmsgCommand<'static>> for super::User {
     fn handle_cmd(
         &mut self,
         PrivmsgCommand {
             receiver,
             free_text,
-        }: PrivmsgCommand,
+            ..
+        }: PrivmsgCommand<'static>,
         ctx: &mut Self::Context,
     ) {
         if let Some(nick) = &self.nick {

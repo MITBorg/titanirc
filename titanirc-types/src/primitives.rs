@@ -2,7 +2,7 @@ use bytes::Bytes;
 use derive_more::{Deref, From};
 use nom::{
     bytes::complete::{tag, take_till},
-    combinator::{iterator},
+    combinator::iterator,
     sequence::terminated,
     IResult,
 };
@@ -16,6 +16,29 @@ pub trait PrimitiveParser {
     fn parse(bytes: BytesWrapper) -> IResult<BytesWrapper, Self>
     where
         Self: Sized;
+}
+
+#[derive(Debug, From)]
+pub enum BytesCow<'a> {
+    Owned(Bytes),
+    Borrowed(&'a [u8]),
+}
+
+impl From<BytesWrapper> for BytesCow<'_> {
+    fn from(other: BytesWrapper) -> Self {
+        Self::Owned(other.into())
+    }
+}
+
+impl std::ops::Deref for BytesCow<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Owned(b) => &*b,
+            Self::Borrowed(b) => *b,
+        }
+    }
 }
 
 macro_rules! noop_validator {
@@ -137,37 +160,37 @@ impl ValidatingParser for Special {
 }
 
 #[derive(Debug, Deref, From)]
-pub struct Username(pub Bytes);
-space_terminated_primitive!(Username);
-noop_validator!(Username);
+pub struct Username<'a>(pub BytesCow<'a>);
+space_terminated_primitive!(Username<'_>);
+noop_validator!(Username<'_>);
 
 #[derive(Debug, Deref, From)]
-pub struct Mode(pub Bytes);
-space_terminated_primitive!(Mode);
-noop_validator!(Mode);
+pub struct Mode<'a>(pub BytesCow<'a>);
+space_terminated_primitive!(Mode<'_>);
+noop_validator!(Mode<'_>);
 
 #[derive(Debug, Deref, From)]
-pub struct HostName(pub Bytes);
-space_terminated_primitive!(HostName);
-noop_validator!(HostName);
+pub struct HostName<'a>(pub BytesCow<'a>);
+space_terminated_primitive!(HostName<'_>);
+noop_validator!(HostName<'_>);
 
 #[derive(Debug, Deref, From)]
-pub struct ServerName(pub Bytes);
-space_terminated_primitive!(ServerName);
-noop_validator!(ServerName);
+pub struct ServerName<'a>(pub BytesCow<'a>);
+space_terminated_primitive!(ServerName<'_>);
+noop_validator!(ServerName<'_>);
 
 #[derive(Debug, Deref, From)]
-pub struct RealName(pub Bytes);
-space_terminated_primitive!(RealName);
-noop_validator!(RealName);
+pub struct RealName<'a>(pub BytesCow<'a>);
+space_terminated_primitive!(RealName<'_>);
+noop_validator!(RealName<'_>);
 
 #[derive(Debug, Deref, From)]
-pub struct Nick(pub Bytes);
-space_terminated_primitive!(Nick);
+pub struct Nick<'a>(pub BytesCow<'a>);
+space_terminated_primitive!(Nick<'_>);
 
 // TODO: i feel like this would be better suited as a nom chomper to stop
 // iterating over the string twice unnecessarily
-impl ValidatingParser for Nick {
+impl ValidatingParser for Nick<'_> {
     fn validate(bytes: &[u8]) -> bool {
         if bytes.is_empty() {
             return false;
@@ -184,20 +207,20 @@ impl ValidatingParser for Nick {
 }
 
 #[derive(Debug, Deref, From)]
-pub struct Channel(pub Bytes);
-space_terminated_primitive!(Channel);
-noop_validator!(Channel);
+pub struct Channel<'a>(pub BytesCow<'a>);
+space_terminated_primitive!(Channel<'_>);
+noop_validator!(Channel<'_>);
 
 #[derive(Debug, Deref, From)]
-pub struct FreeText(pub Bytes);
-free_text_primitive!(FreeText);
-noop_validator!(FreeText);
+pub struct FreeText<'a>(pub BytesCow<'a>);
+free_text_primitive!(FreeText<'_>);
+noop_validator!(FreeText<'_>);
 
 #[derive(Debug, Deref, From)]
-pub struct Nicks(pub Vec<Nick>);
-space_delimited_display!(Nicks);
+pub struct Nicks<'a>(pub Vec<Nick<'a>>);
+space_delimited_display!(Nicks<'_>);
 
-impl PrimitiveParser for Nicks {
+impl PrimitiveParser for Nicks<'_> {
     fn parse(bytes: BytesWrapper) -> IResult<BytesWrapper, Self> {
         let mut it = iterator(
             bytes,
@@ -212,9 +235,9 @@ impl PrimitiveParser for Nicks {
 }
 
 #[derive(Debug)]
-pub struct RightsPrefixedNick(pub Rights, pub Nick);
+pub struct RightsPrefixedNick<'a>(pub Rights, pub Nick<'a>);
 
-impl std::fmt::Display for RightsPrefixedNick {
+impl std::fmt::Display for RightsPrefixedNick<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)?;
         self.1.fmt(f)
@@ -222,13 +245,13 @@ impl std::fmt::Display for RightsPrefixedNick {
 }
 
 #[derive(Debug, Deref, From)]
-pub struct RightsPrefixedNicks(pub Vec<RightsPrefixedNick>);
-space_delimited_display!(RightsPrefixedNicks);
+pub struct RightsPrefixedNicks<'a>(pub Vec<RightsPrefixedNick<'a>>);
+space_delimited_display!(RightsPrefixedNicks<'_>);
 
 #[derive(Debug)]
-pub struct RightsPrefixedChannel(pub Rights, pub Nick);
+pub struct RightsPrefixedChannel<'a>(pub Rights, pub Nick<'a>);
 
-impl std::fmt::Display for RightsPrefixedChannel {
+impl std::fmt::Display for RightsPrefixedChannel<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)?;
         self.1.fmt(f)
@@ -236,8 +259,8 @@ impl std::fmt::Display for RightsPrefixedChannel {
 }
 
 #[derive(Debug, Deref, From)]
-pub struct RightsPrefixedChannels(pub Vec<RightsPrefixedChannel>);
-space_delimited_display!(RightsPrefixedChannels);
+pub struct RightsPrefixedChannels<'a>(pub Vec<RightsPrefixedChannel<'a>>);
+space_delimited_display!(RightsPrefixedChannels<'_>);
 
 #[derive(Debug)]
 pub enum Rights {
@@ -255,12 +278,12 @@ impl std::fmt::Display for Rights {
 }
 
 #[derive(Debug, From)]
-pub enum Receiver {
-    User(Nick),
-    Channel(Channel),
+pub enum Receiver<'a> {
+    User(Nick<'a>),
+    Channel(Channel<'a>),
 }
 
-impl std::ops::Deref for Receiver {
+impl std::ops::Deref for Receiver<'_> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
@@ -272,7 +295,7 @@ impl std::ops::Deref for Receiver {
     }
 }
 
-impl PrimitiveParser for Receiver {
+impl PrimitiveParser for Receiver<'_> {
     fn parse(bytes: BytesWrapper) -> IResult<BytesWrapper, Self> {
         if bytes.get(0) == Some(&b'#') {
             let (rest, channel) = Channel::parse(bytes)?;

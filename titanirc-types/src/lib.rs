@@ -24,19 +24,19 @@ macro_rules! define_commands {
     (
         $(
             $name:ident$((
-                $($param:ty),*
+                $($param:ident$(<$($gen:tt),+>)?),*
             ))?
         ),* $(,)?
     ) => {
         paste::paste! {
             #[derive(Debug)]
-            pub enum Command {
-                $([<$name:camel>]([<$name:camel Command>])),*
+            pub enum Command<'a> {
+                $([<$name:camel>]([<$name:camel Command>]<'a>)),*
             }
 
             $(const [<$name _BYTES>]: &[u8] = stringify!($name).as_bytes();)*
 
-            impl Command {
+            impl Command<'_> {
                 pub fn parse(input: Bytes) -> Result<Option<Self>, nom::Err<NomError<BytesWrapper>>> {
                     let input = BytesWrapper::from(input);
 
@@ -56,7 +56,7 @@ macro_rules! define_commands {
                 }
             }
 
-            impl std::fmt::Display for Command {
+            impl std::fmt::Display for Command<'_> {
                 fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     match self {
                         $(Self::[<$name:camel>](cmd) => cmd.fmt(fmt)),*
@@ -66,11 +66,12 @@ macro_rules! define_commands {
 
             $(
                 #[derive(Debug)]
-                pub struct [<$name:camel Command>] {
-                    $($(pub [<$param:snake>]: $param),*),*
+                pub struct [<$name:camel Command>]<'a> {
+                    pub _phantom: std::marker::PhantomData<&'a ()>,
+                    $($(pub [<$param:snake>]: $param$(<$($gen),+>)?),*),*
                 }
 
-                impl [<$name:camel Command>] {
+                impl [<$name:camel Command>]<'_> {
                     #[allow(unused_variables)]
                     pub fn parse(rest: BytesWrapper) -> Result<Self, nom::Err<nom::error::Error<BytesWrapper>>> {
                         $(
@@ -81,12 +82,13 @@ macro_rules! define_commands {
                         )*
 
                         Ok(Self {
+                            _phantom: std::marker::PhantomData,
                             $($([<$param:snake>]),*),*
                         })
                     }
                 }
 
-                impl std::fmt::Display for [<$name:camel Command>] {
+                impl std::fmt::Display for [<$name:camel Command>]<'_> {
                     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                         fmt.write_str(stringify!($name))?;
 
@@ -101,8 +103,8 @@ macro_rules! define_commands {
                     }
                 }
 
-                impl Into<Command> for [<$name:camel Command>] {
-                    fn into(self) -> Command {
+                impl<'a> Into<Command<'a>> for [<$name:camel Command>]<'a> {
+                    fn into(self) -> Command<'a> {
                         Command::[<$name:camel>](self)
                     }
                 }
@@ -112,24 +114,24 @@ macro_rules! define_commands {
 }
 
 define_commands! {
-    USER(Username, HostName, ServerName, RealName),
-    NICK(Nick),
+    USER(Username<'a>, HostName<'a>, ServerName<'a>, RealName<'a>),
+    NICK(Nick<'a>),
 
     MOTD,
     VERSION,
     HELP,
     USERS,
     TIME,
-    PONG(ServerName),
-    PING(ServerName),
+    PONG(ServerName<'a>),
+    PING(ServerName<'a>),
     LIST,
-    MODE(Nick, Mode),
-    WHOIS(Nick),
-    USERHOST(Nick),
-    USERIP(Nick),
-    JOIN(Channel),
+    MODE(Nick<'a>, Mode<'a>),
+    WHOIS(Nick<'a>),
+    USERHOST(Nick<'a>),
+    USERIP(Nick<'a>),
+    JOIN(Channel<'a>),
 
-    PRIVMSG(Receiver, FreeText),
+    PRIVMSG(Receiver<'a>, FreeText<'a>),
 }
 
 #[cfg(test)]
@@ -149,7 +151,8 @@ mod tests {
             Ok(Some(Command::Privmsg(super::PrivmsgCommand {
                 receiver: super::Receiver::User(super::Nick(nick)),
                 free_text: super::primitives::FreeText(msg),
-            }))) if nick == "foo" && msg == "baz"
+                _phantom: std::marker::PhantomData,
+            }))) if &*nick == b"foo" && &*msg == b"baz"
         ))
     }
 
@@ -160,7 +163,8 @@ mod tests {
             Ok(Some(Command::Privmsg(super::PrivmsgCommand {
                 receiver: super::Receiver::User(super::Nick(nick)),
                 free_text: super::primitives::FreeText(msg),
-            }))) if nick == "foo" && msg == "baz"
+                _phantom: std::marker::PhantomData,
+            }))) if &*nick == b"foo" && &*msg == b"baz"
         ))
     }
 }

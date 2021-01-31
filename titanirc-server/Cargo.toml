@@ -10,8 +10,8 @@ edition = "2018"
 titanirc-codec = { path = "../titanirc-codec" }
 titanirc-types = { path = "../titanirc-types" }
 
-actix = { git = "https://github.com/actix/actix", rev = "fdaa5d50e25ffc892f5c1c6fcc51097796debecf" } # tokio 1.0 support not yet released
-actix-rt = "2.0.0-beta.1"
+actix = { git = "https://github.com/JordanForks/actix" }
+actix-rt = "=2.0.0-beta.2"
 tokio = { version = "1.1", features = ["net", "signal"] }
 tokio-util = "0.6"
 async-stream = "0.3"

@@ -1,4 +1,4 @@
-use bytes::{BytesMut};
+use bytes::BytesMut;
 use titanirc_types::Command;
 use tokio_util::codec::Decoder as FrameDecoder;
 
@@ -7,7 +7,8 @@ pub const MAX_LENGTH: usize = 1024;
 pub struct Decoder;
 
 impl FrameDecoder for Decoder {
-    type Item = Command;
+    /// Returns `'static` since we just return `BytesCow::Owned(bytes::Bytes)` and doesn't use the lifetime.
+    type Item = Command<'static>;
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -49,7 +50,7 @@ impl FrameDecoder for Decoder {
 
 pub struct Encoder;
 
-impl tokio_util::codec::Encoder<titanirc_types::ServerMessage> for Encoder {
+impl tokio_util::codec::Encoder<titanirc_types::ServerMessage<'_>> for Encoder {
     type Error = std::io::Error;
 
     fn encode(

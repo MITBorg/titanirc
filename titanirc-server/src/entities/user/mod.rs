@@ -3,7 +3,7 @@ pub mod events;
 
 use crate::{entities::channel::events::JoinBroadcast, server::Server};
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use actix::{
     io::{FramedWrite, WriteHandler},
@@ -11,13 +11,17 @@ use actix::{
 };
 use std::time::{Duration, Instant};
 use titanirc_types::{
-    Channel, FreeText, JoinCommand, PrivmsgCommand, Receiver, ServerMessage, Source,
+    Channel, FreeText, JoinCommand, Nick, PrivmsgCommand, Receiver, ServerMessage, Source,
 };
 use tokio::{io::WriteHalf, net::TcpStream};
 
 pub struct User {
     pub server: Addr<Server>,
-    pub writer: FramedWrite<ServerMessage, WriteHalf<TcpStream>, titanirc_codec::Encoder>,
+    pub writer: FramedWrite<
+        WriteHalf<TcpStream>,
+        titanirc_codec::Encoder,
+        <titanirc_codec::Encoder as tokio_util::codec::Encoder<ServerMessage<'static>>>::Error,
+    >,
     pub last_active: Instant,
     pub nick: Option<String>,
 }
@@ -27,7 +31,7 @@ pub struct User {
 impl User {
     pub fn new(
         server: Addr<Server>,
-        writer: FramedWrite<ServerMessage, WriteHalf<TcpStream>, titanirc_codec::Encoder>,
+        writer: FramedWrite<WriteHalf<TcpStream>, titanirc_codec::Encoder>,
     ) -> Self {
         Self {
             server,
@@ -70,9 +74,10 @@ impl actix::Handler<Arc<JoinBroadcast>> for User {
 
     fn handle(&mut self, msg: Arc<JoinBroadcast>, _ctx: &mut Self::Context) -> Self::Result {
         self.writer.write(ServerMessage::Command(
-            Source::User(bytes::Bytes::from(msg.nick.as_bytes().to_owned()).into()),
+            Source::User(Nick(msg.nick.as_bytes().into())),
             JoinCommand {
-                channel: Channel::from(bytes::Bytes::from(msg.channel_name.as_bytes().to_owned())),
+                _phantom: std::marker::PhantomData,
+                channel: Channel(msg.channel_name.as_bytes().into()),
             }
             .into(),
         ));
@@ -88,12 +93,11 @@ impl actix::Handler<Arc<crate::entities::common_events::Message>> for User {
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         self.writer.write(ServerMessage::Command(
-            Source::User(bytes::Bytes::from(msg.from.as_bytes().to_owned()).into()),
+            Source::User(Nick(msg.from.as_bytes().into())),
             PrivmsgCommand {
-                free_text: FreeText(bytes::Bytes::from(msg.message.as_bytes().to_owned())),
-                receiver: {
-                    Receiver::Channel(bytes::Bytes::from(msg.to.as_bytes().to_owned()).into())
-                },
+                _phantom: std::marker::PhantomData,
+                free_text: FreeText(msg.message.as_bytes().into()),
+                receiver: Receiver::Channel(Channel(msg.to.as_bytes().into())),
             }
             .into(),
         ));

@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use titanirc_types::Command;
+use titanirc_types::{protocol::commands::Command, RegisteredNick};
 use tokio_util::codec::Decoder as FrameDecoder;
 
 pub const MAX_LENGTH: usize = 1024;
@@ -50,35 +50,25 @@ impl FrameDecoder for Decoder {
 
 pub struct Encoder {
     server_name: &'static str,
-    pub nick: Option<String>,
+    nick: RegisteredNick,
 }
 
 impl Encoder {
     #[must_use]
-    pub fn new(server_name: &'static str) -> Self {
-        Self {
-            server_name,
-            nick: None,
-        }
+    pub fn new(server_name: &'static str, nick: RegisteredNick) -> Self {
+        Self { server_name, nick }
     }
 }
 
-impl tokio_util::codec::Encoder<titanirc_types::ServerMessage<'_>> for Encoder {
+impl tokio_util::codec::Encoder<titanirc_types::protocol::ServerMessage<'_>> for Encoder {
     type Error = std::io::Error;
 
     fn encode(
         &mut self,
-        item: titanirc_types::ServerMessage,
+        item: titanirc_types::protocol::ServerMessage,
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
-        item.write(
-            &self.server_name,
-            match &self.nick {
-                Some(v) => v,
-                None => "*",
-            },
-            dst,
-        );
+        item.write(&self.server_name, &self.nick, dst);
         dst.extend_from_slice(b"\r\n");
         Ok(())
     }

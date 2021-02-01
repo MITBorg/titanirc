@@ -1,10 +1,14 @@
 //! Handlers for commands originating from a user.
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use actix::{Actor, AsyncContext, StreamHandler, WrapFuture};
-use titanirc_types::{
-    Command, JoinCommand, ModeCommand, MotdCommand, NickCommand, PrivmsgCommand, VersionCommand,
+use titanirc_types::protocol::{
+    commands::{
+        Command, JoinCommand, ModeCommand, MotdCommand, NickCommand, PrivmsgCommand, VersionCommand,
+    },
+    primitives,
+    replies::Reply,
 };
 
 pub trait CommandHandler<T>: Actor {
@@ -38,14 +42,13 @@ impl CommandHandler<NickCommand<'static>> for super::User {
         NickCommand { nick, .. }: NickCommand<'static>,
         _ctx: &mut Self::Context,
     ) {
-        self.nick = Some(std::str::from_utf8(&nick.0[..]).unwrap().to_string());
-        (*self.writer.encoder_mut()).nick = self.nick.clone();
+        self.nick.set(Arc::new(nick.to_bytes()));
 
-        self.writer.write(titanirc_types::Reply::RplWelcome.into());
-        self.writer.write(titanirc_types::Reply::RplYourHost.into());
-        self.writer.write(titanirc_types::Reply::RplCreated.into());
-        self.writer.write(titanirc_types::Reply::RplMyInfo.into());
-        self.writer.write(titanirc_types::Reply::RplISupport.into());
+        self.writer.write(Reply::RplWelcome.into());
+        self.writer.write(Reply::RplYourHost.into());
+        self.writer.write(Reply::RplCreated.into());
+        self.writer.write(Reply::RplMyInfo.into());
+        self.writer.write(Reply::RplISupport.into());
         // LUSERS
         // RPL_UMODEIS
         // MOTD
@@ -58,29 +61,31 @@ impl CommandHandler<JoinCommand<'static>> for super::User {
         JoinCommand { channel, .. }: JoinCommand<'static>,
         ctx: &mut Self::Context,
     ) {
-        if let Some(ref nick) = self.nick {
-            let server_addr = self.server.clone();
-            let ctx_addr = ctx.address();
-            let nick = nick.clone();
+        // TODO: ensure the user has a nick set before they join a channel!!!
 
-            // TODO: needs to send MODE & NAMES (353, 366)
-            ctx.spawn(
-                async move {
-                    server_addr
-                        .send(crate::entities::channel::events::Join {
-                            channel_name: std::str::from_utf8(&channel.0[..]).unwrap().to_string(),
-                            user: ctx_addr,
-                            nick,
-                        })
-                        .await
-                        .unwrap()
-                        .unwrap();
+        let server_addr = self.server.clone();
+        let ctx_addr = ctx.address();
+        let nick = self.nick.clone();
+        let user_uuid = self.session_id;
 
-                    println!("joined chan!");
-                }
-                .into_actor(self),
-            );
-        }
+        // TODO: needs to send MODE & NAMES (353, 366)
+        ctx.spawn(
+            async move {
+                server_addr
+                    .send(crate::entities::channel::events::Join {
+                        channel_name: std::str::from_utf8(&channel.0[..]).unwrap().to_string(),
+                        user_uuid,
+                        user: ctx_addr,
+                        nick,
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap();
+
+                println!("joined chan!");
+            }
+            .into_actor(self),
+        );
     }
 }
 
@@ -90,8 +95,7 @@ impl CommandHandler<ModeCommand<'static>> for super::User {
         ModeCommand { mode, .. }: ModeCommand<'static>,
         _ctx: &mut Self::Context,
     ) {
-        self.writer
-            .write(titanirc_types::Reply::RplUmodeIs(mode).into())
+        self.writer.write(Reply::RplUmodeIs(mode).into())
     }
 }
 
@@ -101,20 +105,13 @@ impl CommandHandler<MotdCommand<'static>> for super::User {
         static MOTD1: bytes::Bytes = bytes::Bytes::from_static(b"Hello, welcome to this server!");
         static MOTD2: bytes::Bytes = bytes::Bytes::from_static(b"it's very cool!");
 
-        self.writer.write(
-            titanirc_types::Reply::RplMotdStart(titanirc_types::ServerName(
-                SERVER_NAME.clone().into(),
-            ))
-            .into(),
-        );
-        self.writer.write(
-            titanirc_types::Reply::RplMotd(titanirc_types::FreeText(MOTD1.clone().into())).into(),
-        );
-        self.writer.write(
-            titanirc_types::Reply::RplMotd(titanirc_types::FreeText(MOTD2.clone().into())).into(),
-        );
         self.writer
-            .write(titanirc_types::Reply::RplEndOfMotd.into());
+            .write(Reply::RplMotdStart(primitives::ServerName(SERVER_NAME.clone().into())).into());
+        self.writer
+            .write(Reply::RplMotd(primitives::FreeText(MOTD1.clone().into())).into());
+        self.writer
+            .write(Reply::RplMotd(primitives::FreeText(MOTD2.clone().into())).into());
+        self.writer.write(Reply::RplEndOfMotd.into());
     }
 }
 
@@ -125,11 +122,11 @@ impl CommandHandler<VersionCommand<'static>> for super::User {
             bytes::Bytes::from_static(b"https://github.com/MITBorg/titanirc");
 
         self.writer.write(
-            titanirc_types::Reply::RplVersion(
+            titanirc_types::protocol::replies::Reply::RplVersion(
                 clap::crate_version!().to_string(),
                 "release".to_string(),
-                titanirc_types::ServerName(SERVER_NAME.clone().into()),
-                titanirc_types::FreeText(INFO.clone().into()),
+                primitives::ServerName(SERVER_NAME.clone().into()),
+                primitives::FreeText(INFO.clone().into()),
             )
             .into(),
         )
@@ -146,21 +143,22 @@ impl CommandHandler<PrivmsgCommand<'static>> for super::User {
         }: PrivmsgCommand<'static>,
         ctx: &mut Self::Context,
     ) {
-        if let Some(nick) = &self.nick {
-            let msg = crate::entities::common_events::Message {
-                from: nick.clone(), // TODO: this need to be a full user string i think
-                to: receiver,
-                message: free_text.to_string(),
-            };
+        // TODO: ensure the user has a nick before sending messages!!
 
-            let server_addr = self.server.clone();
+        let msg = crate::entities::common_events::Message {
+            from: self.nick.clone(), // TODO: this need to be a full user string i think
+            user_uuid: self.session_id,
+            to: receiver,
+            message: free_text.to_string(),
+        };
 
-            ctx.spawn(
-                async move {
-                    server_addr.send(msg).await.unwrap();
-                }
-                .into_actor(self),
-            );
-        }
+        let server_addr = self.server.clone();
+
+        ctx.spawn(
+            async move {
+                server_addr.send(msg).await.unwrap();
+            }
+            .into_actor(self),
+        );
     }
 }

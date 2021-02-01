@@ -3,7 +3,7 @@ use crate::entities::{channel::Channel, user::User};
 use std::{collections::HashMap, net::SocketAddr};
 
 use actix::{io::FramedWrite, prelude::*};
-use titanirc_types::Receiver;
+use titanirc_types::{protocol::primitives::Receiver, RegisteredNick, UserIdent};
 use tokio::net::TcpStream;
 use tokio_util::codec::FramedRead;
 
@@ -16,12 +16,15 @@ use tokio_util::codec::FramedRead;
 pub struct Server {
     /// A list of known channels and the addresses to them.
     pub channels: HashMap<String, Addr<Channel>>,
+    // A list of known connected users.
+    // pub users: Vec<(UserIdent, Addr<User>)>,    // todo: add this when we know how auth is gonna work
 }
 
 impl Server {
     pub fn new() -> Self {
         Self {
             channels: HashMap::new(),
+            // users: Vec::new(),
         }
     }
 }
@@ -44,15 +47,22 @@ impl Handler<Connection> for Server {
         println!("Accepted connection from {}", remote);
 
         User::create(move |ctx| {
+            let nick = RegisteredNick::new();
+
             let (read, write) = tokio::io::split(stream);
             let read = FramedRead::new(read, titanirc_codec::Decoder);
-            let write =
-                FramedWrite::new(write, titanirc_codec::Encoder::new("my.cool.server"), ctx);
+            let write = FramedWrite::new(
+                write,
+                titanirc_codec::Encoder::new("my.cool.server", nick.clone()), // TODO: this should take a UserIdent
+                ctx,
+            );
 
             // Make our new `User` handle all events from this socket in `StreamHandler<Result<Command, _>>`.
             ctx.add_stream(read);
 
-            User::new(server_ctx.address(), write)
+            // TODO: don't give the user a full server handle until they're authed
+            //  ... only add the self.user to `user` then and only then.
+            User::new(server_ctx.address(), write, nick)
         });
     }
 }
@@ -61,6 +71,7 @@ impl Handler<Connection> for Server {
 impl Handler<crate::entities::channel::events::Join> for Server {
     type Result = ResponseActFuture<Self, crate::entities::channel::events::JoinResult>;
 
+    // TODO: validate channel name
     fn handle(
         &mut self,
         msg: crate::entities::channel::events::Join,

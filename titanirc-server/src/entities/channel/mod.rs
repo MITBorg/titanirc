@@ -1,9 +1,9 @@
 pub mod events;
 
 use actix::prelude::*;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::entities::user::User;
+use crate::entities::user::{User, UserUuid};
 
 use self::events::JoinBroadcast;
 
@@ -16,18 +16,22 @@ pub struct Handle {
 
 /// An IRC channel.
 pub struct Channel {
-    pub members: Vec<Addr<User>>,
+    pub members: HashMap<UserUuid, Addr<User>>,
 }
 
 impl Channel {
     pub fn new() -> Self {
         Self {
-            members: Vec::new(),
+            members: HashMap::new(),
         }
     }
 
     // TODO: add a flag not to broadcast messages to the source so PRIVMSGs dont get duplicated
-    fn broadcast_message<M>(&self, msg: M) -> impl Future<Output = ()>
+    fn broadcast_message<M>(
+        &self,
+        skip_sender: Option<UserUuid>,
+        msg: M,
+    ) -> impl Future<Output = ()>
     where
         M: Message + Send + Sync,
         M::Result: Send,
@@ -38,7 +42,13 @@ impl Channel {
 
         let msg = Arc::new(msg);
 
-        for member in &self.members {
+        for (uuid, member) in &self.members {
+            if let Some(skip_sender) = &skip_sender {
+                if skip_sender == uuid {
+                    continue;
+                }
+            }
+
             futures.push(member.send(msg.clone()));
         }
 
@@ -56,10 +66,10 @@ impl actix::Handler<events::Join> for Channel {
     type Result = events::JoinResult;
 
     fn handle(&mut self, msg: events::Join, ctx: &mut Self::Context) -> Self::Result {
-        self.members.push(msg.user.clone());
+        self.members.insert(msg.user_uuid, msg.user.clone());
 
         ctx.spawn(
-            self.broadcast_message(JoinBroadcast::from(msg))
+            self.broadcast_message(None, JoinBroadcast::from(msg))
                 .into_actor(self),
         );
 
@@ -77,6 +87,10 @@ impl actix::Handler<super::common_events::Message> for Channel {
         msg: super::common_events::Message,
         ctx: &mut Self::Context,
     ) -> Self::Result {
-        ctx.spawn(self.broadcast_message(msg).into_actor(self));
+        // TODO: don't allow messages from unconnected clients
+        ctx.spawn(
+            self.broadcast_message(Some(msg.user_uuid), msg)
+                .into_actor(self),
+        );
     }
 }

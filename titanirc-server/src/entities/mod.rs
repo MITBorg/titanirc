@@ -7,8 +7,9 @@ pub mod common_events {
     #[derive(Debug, Message)]
     #[rtype(result = "")]
     pub struct Message {
-        pub from: String,
-        pub to: titanirc_types::Receiver<'static>,
+        pub from: titanirc_types::RegisteredNick,
+        pub user_uuid: crate::entities::user::UserUuid,
+        pub to: titanirc_types::protocol::primitives::Receiver<'static>,
         pub message: String,
     }
 }

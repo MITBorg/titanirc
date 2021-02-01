@@ -67,6 +67,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4d7d63395147b81a9e570bcc6243aaf71c017bd666d4909cfef0085bdda8d73"
+
+[[package]]
 name = "arrayvec"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -894,9 +900,11 @@ version = "0.1.0"
 dependencies = [
  "actix",
  "actix-rt",
+ "arc-swap",
  "async-stream",
  "bytes",
  "clap",
+ "derive_more",
  "displaydoc",
  "futures-util",
  "thiserror",
@@ -904,12 +912,14 @@ dependencies = [
  "titanirc-types",
  "tokio",
  "tokio-util",
+ "uuid",
 ]
 
 [[package]]
 name = "titanirc-types"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
  "bytes",
  "derive_more",
  "nom",
@@ -1040,6 +1050,15 @@ dependencies = [
  "idna",
  "matches",
  "percent-encoding",
+]
+
+[[package]]
+name = "uuid"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+dependencies = [
+ "getrandom",
 ]
 
 [[package]]

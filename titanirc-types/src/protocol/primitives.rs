@@ -26,6 +26,15 @@ pub enum BytesCow<'a> {
     Borrowed(&'a [u8]),
 }
 
+impl BytesCow<'_> {
+    pub fn to_bytes(&self) -> Bytes {
+        match self {
+            Self::Owned(b) => b.clone(),
+            Self::Borrowed(b) => Bytes::copy_from_slice(b),
+        }
+    }
+}
+
 impl From<BytesWrapper> for BytesCow<'_> {
     fn from(other: BytesWrapper) -> Self {
         Self::Owned(other.into())

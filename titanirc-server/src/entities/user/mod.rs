@@ -3,19 +3,31 @@ pub mod events;
 
 use crate::{entities::channel::events::JoinBroadcast, server::Server};
 
-use std::sync::Arc;
+use std::{collections::HashMap, hash::Hash, sync::Arc};
 
 use actix::{
     io::{FramedWrite, WriteHandler},
     prelude::*,
 };
+use bytes::Bytes;
+use derive_more::Deref;
 use std::time::{Duration, Instant};
 use titanirc_types::{
-    Channel, FreeText, JoinCommand, Nick, PrivmsgCommand, Receiver, ServerMessage, Source,
+    protocol::commands::{JoinCommand, PrivmsgCommand},
+    protocol::primitives::{Channel, FreeText, Nick, Receiver},
+    protocol::replies::Source,
+    protocol::ServerMessage,
+    RegisteredNick,
 };
 use tokio::{io::WriteHalf, net::TcpStream};
+use uuid::Uuid;
+
+#[derive(Debug, Deref, Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::module_name_repetitions)]
+pub struct UserUuid(Uuid);
 
 pub struct User {
+    pub session_id: UserUuid,
     pub server: Addr<Server>,
     pub writer: FramedWrite<
         WriteHalf<TcpStream>,
@@ -23,7 +35,8 @@ pub struct User {
         <titanirc_codec::Encoder as tokio_util::codec::Encoder<ServerMessage<'static>>>::Error,
     >,
     pub last_active: Instant,
-    pub nick: Option<String>,
+    pub nick: RegisteredNick,
+    pub channels: HashMap<Arc<String>, crate::entities::channel::Handle>,
 }
 
 // TODO: broadcast a leave to all the user's channels on actor shutdown
@@ -32,12 +45,15 @@ impl User {
     pub fn new(
         server: Addr<Server>,
         writer: FramedWrite<WriteHalf<TcpStream>, titanirc_codec::Encoder>,
+        nick: RegisteredNick,
     ) -> Self {
         Self {
+            session_id: UserUuid(Uuid::new_v4()),
             server,
             writer,
             last_active: Instant::now(),
-            nick: None,
+            nick,
+            channels: HashMap::new(),
         }
     }
 }
@@ -51,7 +67,8 @@ fn schedule_ping(ctx: &mut <User as Actor>::Context) {
             ctx.stop();
         }
 
-        act.writer.write(titanirc_types::ServerMessage::Ping);
+        act.writer
+            .write(titanirc_types::protocol::ServerMessage::Ping);
         schedule_ping(ctx);
     });
 }
@@ -74,7 +91,7 @@ impl actix::Handler<Arc<JoinBroadcast>> for User {
 
     fn handle(&mut self, msg: Arc<JoinBroadcast>, _ctx: &mut Self::Context) -> Self::Result {
         self.writer.write(ServerMessage::Command(
-            Source::User(Nick(msg.nick.as_bytes().into())),
+            Source::User(Nick((*msg.nick.load().unwrap()).clone().into())),
             JoinCommand {
                 _phantom: std::marker::PhantomData,
                 channel: Channel(msg.channel_name.as_bytes().into()),
@@ -93,7 +110,7 @@ impl actix::Handler<Arc<crate::entities::common_events::Message>> for User {
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         self.writer.write(ServerMessage::Command(
-            Source::User(Nick(msg.from.as_bytes().into())),
+            Source::User(Nick((*msg.from.load().unwrap()).clone().into())),
             PrivmsgCommand {
                 _phantom: std::marker::PhantomData,
                 free_text: FreeText(msg.message.as_bytes().into()),

@@ -1,5 +1,6 @@
-use crate::entities::user::User;
+use crate::entities::user::{User, UserUuid};
 use actix::prelude::*;
+use titanirc_types::RegisteredNick;
 
 pub type JoinResult = Result<super::Handle, JoinError>;
 
@@ -9,7 +10,8 @@ pub type JoinResult = Result<super::Handle, JoinError>;
 #[rtype(result = "JoinResult")]
 pub struct Join {
     pub channel_name: String,
-    pub nick: String,
+    pub user_uuid: UserUuid,
+    pub nick: RegisteredNick,
     pub user: Addr<User>,
 }
 
@@ -24,7 +26,7 @@ pub enum JoinError {
 #[rtype(result = "")]
 pub struct JoinBroadcast {
     pub channel_name: String,
-    pub nick: String,
+    pub nick: RegisteredNick,
 }
 
 impl From<Join> for JoinBroadcast {

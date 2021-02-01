@@ -1,178 +1,58 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)]
 
-mod primitives;
-mod replies;
-
-pub use crate::primitives::*;
-pub use crate::replies::{Reply, ServerMessage, Source};
+use std::{hash::Hash, sync::Arc};
 
 use bytes::Bytes;
-use nom::{
-    bytes::complete::{tag, take_till},
-    error::Error as NomError,
-};
-use nom_bytes::BytesWrapper;
 
-fn parse_optional_source(input: BytesWrapper) -> nom::IResult<BytesWrapper, BytesWrapper> {
-    let (rest, _) = tag(":".as_bytes())(input)?;
-    let (rest, _) = take_till(|c| c == b' ')(rest)?;
-    tag(" ".as_bytes())(rest)
+pub mod protocol;
+
+#[derive(Debug, Clone)]
+pub struct UserIdent {
+    nick: RegisteredNick,
+    username: Arc<String>,
+    host: Arc<String>,
 }
 
-macro_rules! define_commands {
-    (
-        $(
-            $name:ident$((
-                $($param:ident$(<$($gen:tt),+>)?),*
-            ))?
-        ),* $(,)?
-    ) => {
-        paste::paste! {
-            /// All the commands that can be ran by a client, also provides a `Display`
-            /// implementation that serialises the command for sending over the wire,
-            /// ie. for forwarding.
-            #[derive(Debug)]
-            pub enum Command<'a> {
-                $([<$name:camel>]([<$name:camel Command>]<'a>)),*
-            }
+/// A reference to a user's nickname. The actual nickname can be loaded using
+/// `UserNick::load()`, however this username can be changed fairly quickly,
+/// so the loaded value shouldn't be stored.
+///
+/// The user's nickname can be changed using `UserNick::set()` however this
+/// doesn't do any validation that the user is actually allowed to use the
+/// nick, nor does it send out any events alerting the users of the server
+/// that the user's nick has changed.
+#[derive(Debug, Clone)]
+#[allow(clippy::clippy::module_name_repetitions)]
+pub struct RegisteredNick(Arc<arc_swap::ArcSwapOption<Bytes>>);
 
-            $(const [<$name _BYTES>]: &[u8] = stringify!($name).as_bytes();)*
-
-            impl Command<'_> {
-                /// Parses a command from the wire, returning an `Err` if the command was unparsable or
-                /// `Ok(None)` if the command was unrecognsied. The given `Bytes` should have the CRLF
-                /// stripped.
-                pub fn parse(input: Bytes) -> Result<Option<Self>, nom::Err<NomError<BytesWrapper>>> {
-                    let mut input = BytesWrapper::from(input);
-
-                    // skip the optional source at the start of the message
-                    if let Ok((input_source_stripped, _)) = parse_optional_source(input.clone()) {
-                        input = input_source_stripped;
-                    }
-
-                    let (params, command) = take_till(|c| c == b' ')(input)?;
-
-                    match command.to_ascii_uppercase().as_ref() {
-                        $([<$name _BYTES>] => Ok(Some(Self::[<$name:camel>]([<$name:camel Command>]::parse(params)?)))),*,
-                        _ => Ok(None)
-                    }
-                }
-            }
-
-            /// Serialises the command for sending over the wire.
-            impl std::fmt::Display for Command<'_> {
-                fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    match self {
-                        $(Self::[<$name:camel>](cmd) => cmd.fmt(fmt)),*
-                    }
-                }
-            }
-
-            $(
-                #[derive(Debug)]
-                pub struct [<$name:camel Command>]<'a> {
-                    pub _phantom: std::marker::PhantomData<&'a ()>,
-                    $($(pub [<$param:snake>]: $param$(<$($gen),+>)?),*),*
-                }
-
-                impl [<$name:camel Command>]<'_> {
-                    /// Parses the command's arguments, with each parameter separated by a space.
-                    #[allow(unused_variables)]
-                    pub fn parse(rest: BytesWrapper) -> Result<Self, nom::Err<nom::error::Error<BytesWrapper>>> {
-                        $(
-                            $(
-                                let (rest, _) = tag(" ".as_bytes())(rest)?;
-                                let (rest, [<$param:snake>]) = $param::parse(rest)?;
-                            )*
-                        )*
-
-                        Ok(Self {
-                            _phantom: std::marker::PhantomData,
-                            $($([<$param:snake>]),*),*
-                        })
-                    }
-                }
-
-                /// Serialises the command's arguments for sending over the wire, joining
-                /// all the arguments separating them with a space.
-                impl std::fmt::Display for [<$name:camel Command>]<'_> {
-                    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        fmt.write_str(stringify!($name))?;
-
-                        $(
-                            $(
-                                fmt.write_str(" ")?;
-                                self.[<$param:snake>].fmt(fmt)?;
-                            )*
-                        )*
-
-                        Ok(())
-                    }
-                }
-
-                impl<'a> Into<Command<'a>> for [<$name:camel Command>]<'a> {
-                    fn into(self) -> Command<'a> {
-                        Command::[<$name:camel>](self)
-                    }
-                }
-            )*
-        }
-    };
-}
-
-define_commands! {
-    USER(Username<'a>, HostName<'a>, ServerName<'a>, RealName<'a>),
-    NICK(Nick<'a>),
-
-    MOTD,
-    VERSION,
-    HELP,
-    USERS,
-    TIME,
-    PONG(ServerName<'a>),
-    PING(ServerName<'a>),
-    LIST,
-    MODE(Nick<'a>, Mode<'a>),
-    WHOIS(Nick<'a>),
-    USERHOST(Nick<'a>),
-    USERIP(Nick<'a>),
-    JOIN(Channel<'a>),
-
-    PRIVMSG(Receiver<'a>, FreeText<'a>),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Command;
-    use bytes::Bytes;
-
-    #[test]
-    fn parse_empty() {
-        assert!(matches!(Command::parse(Bytes::from_static(b"")), Ok(None)));
+impl RegisteredNick {
+    #[must_use]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self(Arc::new(arc_swap::ArcSwapOption::empty()))
     }
 
-    #[test]
-    fn parse_privmsg() {
-        assert!(matches!(
-            Command::parse(Bytes::from_static(b"PRIVMSG foo :baz")),
-            Ok(Some(Command::Privmsg(super::PrivmsgCommand {
-                receiver: super::Receiver::User(super::Nick(nick)),
-                free_text: super::primitives::FreeText(msg),
-                _phantom: std::marker::PhantomData,
-            }))) if &*nick == b"foo" && &*msg == b"baz"
-        ))
+    #[must_use]
+    pub fn load(&self) -> Option<Arc<Bytes>> {
+        self.0.load().clone()
     }
 
-    #[test]
-    fn parse_privmsg_opt_source() {
-        assert!(matches!(
-            Command::parse(Bytes::from_static(b":some-fake-source!dude@nice PRIVMSG foo :baz")),
-            Ok(Some(Command::Privmsg(super::PrivmsgCommand {
-                receiver: super::Receiver::User(super::Nick(nick)),
-                free_text: super::primitives::FreeText(msg),
-                _phantom: std::marker::PhantomData,
-            }))) if &*nick == b"foo" && &*msg == b"baz"
-        ))
+    pub fn set(&self, nick: Arc<Bytes>) {
+        self.0.store(Some(nick))
     }
 }
+
+impl Hash for RegisteredNick {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state)
+    }
+}
+
+impl PartialEq for RegisteredNick {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for RegisteredNick {}

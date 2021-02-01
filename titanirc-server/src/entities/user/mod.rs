@@ -97,7 +97,7 @@ impl actix::Handler<Arc<crate::entities::common_events::Message>> for User {
             PrivmsgCommand {
                 _phantom: std::marker::PhantomData,
                 free_text: FreeText(msg.message.as_bytes().into()),
-                receiver: Receiver::Channel(Channel(msg.to.as_bytes().into())),
+                receiver: msg.to.clone(),
             }
             .into(),
         ));

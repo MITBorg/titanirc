@@ -32,6 +32,15 @@ impl From<BytesWrapper> for BytesCow<'_> {
     }
 }
 
+impl Clone for BytesCow<'_> {
+    fn clone(&self) -> Self {
+        Self::Owned(match self {
+            Self::Owned(b) => b.clone(),
+            Self::Borrowed(b) => Bytes::copy_from_slice(b),
+        })
+    }
+}
+
 impl std::ops::Deref for BytesCow<'_> {
     type Target = [u8];
 
@@ -161,32 +170,32 @@ impl ValidatingParser for Special {
     }
 }
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct Username<'a>(pub BytesCow<'a>);
 space_terminated_primitive!(Username<'_>);
 noop_validator!(Username<'_>);
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct Mode<'a>(pub BytesCow<'a>);
 space_terminated_primitive!(Mode<'_>);
 noop_validator!(Mode<'_>);
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct HostName<'a>(pub BytesCow<'a>);
 space_terminated_primitive!(HostName<'_>);
 noop_validator!(HostName<'_>);
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct ServerName<'a>(pub BytesCow<'a>);
 space_terminated_primitive!(ServerName<'_>);
 noop_validator!(ServerName<'_>);
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct RealName<'a>(pub BytesCow<'a>);
 space_terminated_primitive!(RealName<'_>);
 noop_validator!(RealName<'_>);
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct Nick<'a>(pub BytesCow<'a>);
 space_terminated_primitive!(Nick<'_>);
 
@@ -208,17 +217,17 @@ impl ValidatingParser for Nick<'_> {
     }
 }
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct Channel<'a>(pub BytesCow<'a>);
 space_terminated_primitive!(Channel<'_>);
 noop_validator!(Channel<'_>);
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct FreeText<'a>(pub BytesCow<'a>);
 free_text_primitive!(FreeText<'_>);
 noop_validator!(FreeText<'_>);
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct Nicks<'a>(pub Vec<Nick<'a>>);
 space_delimited_display!(Nicks<'_>);
 
@@ -236,7 +245,7 @@ impl PrimitiveParser for Nicks<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RightsPrefixedNick<'a>(pub Rights, pub Nick<'a>);
 
 impl std::fmt::Display for RightsPrefixedNick<'_> {
@@ -246,11 +255,11 @@ impl std::fmt::Display for RightsPrefixedNick<'_> {
     }
 }
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct RightsPrefixedNicks<'a>(pub Vec<RightsPrefixedNick<'a>>);
 space_delimited_display!(RightsPrefixedNicks<'_>);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RightsPrefixedChannel<'a>(pub Rights, pub Nick<'a>);
 
 impl std::fmt::Display for RightsPrefixedChannel<'_> {
@@ -260,11 +269,11 @@ impl std::fmt::Display for RightsPrefixedChannel<'_> {
     }
 }
 
-#[derive(Debug, Deref, From)]
+#[derive(Debug, Deref, Clone, From)]
 pub struct RightsPrefixedChannels<'a>(pub Vec<RightsPrefixedChannel<'a>>);
 space_delimited_display!(RightsPrefixedChannels<'_>);
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Rights {
     Op,
     Voice,
@@ -279,7 +288,7 @@ impl std::fmt::Display for Rights {
     }
 }
 
-#[derive(Debug, From)]
+#[derive(Debug, From, Clone)]
 pub enum Receiver<'a> {
     User(Nick<'a>),
     Channel(Channel<'a>),

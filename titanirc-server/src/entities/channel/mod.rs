@@ -26,6 +26,7 @@ impl Channel {
         }
     }
 
+    // TODO: add a flag not to broadcast messages to the source so PRIVMSGs dont get duplicated
     fn broadcast_message<M>(&self, msg: M) -> impl Future<Output = ()>
     where
         M: Message + Send + Sync,

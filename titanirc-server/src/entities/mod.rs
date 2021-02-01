@@ -8,7 +8,7 @@ pub mod common_events {
     #[rtype(result = "")]
     pub struct Message {
         pub from: String,
-        pub to: String,
+        pub to: titanirc_types::Receiver<'static>,
         pub message: String,
     }
 }

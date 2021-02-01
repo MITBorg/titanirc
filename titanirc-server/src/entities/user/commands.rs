@@ -1,3 +1,5 @@
+//! Handlers for commands originating from a user.
+
 use std::time::Instant;
 
 use actix::{Actor, AsyncContext, StreamHandler, WrapFuture};
@@ -61,6 +63,7 @@ impl CommandHandler<JoinCommand<'static>> for super::User {
             let ctx_addr = ctx.address();
             let nick = nick.clone();
 
+            // TODO: needs to send MODE & NAMES (353, 366)
             ctx.spawn(
                 async move {
                     server_addr
@@ -146,7 +149,7 @@ impl CommandHandler<PrivmsgCommand<'static>> for super::User {
         if let Some(nick) = &self.nick {
             let msg = crate::entities::common_events::Message {
                 from: nick.clone(), // TODO: this need to be a full user string i think
-                to: receiver.to_string(),
+                to: receiver,
                 message: free_text.to_string(),
             };
 

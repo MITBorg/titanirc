@@ -3,6 +3,7 @@ use crate::entities::{channel::Channel, user::User};
 use std::{collections::HashMap, net::SocketAddr};
 
 use actix::{io::FramedWrite, prelude::*};
+use titanirc_types::Receiver;
 use tokio::net::TcpStream;
 use tokio_util::codec::FramedRead;
 
@@ -95,15 +96,42 @@ impl Handler<crate::entities::common_events::Message> for Server {
         msg: crate::entities::common_events::Message,
         ctx: &mut Self::Context,
     ) -> Self::Result {
-        eprintln!("to: {}", msg.to);
+        let dest = MessageDestination::get_destination_from_receiver(&self, &msg.to).unwrap();
+        dest.send(ctx, msg);
+    }
+}
 
-        let channel = self.channels.get(&msg.to).unwrap().clone();
+pub enum MessageDestination<'a> {
+    User(&'a Server, Addr<User>),
+    Channel(&'a Server, Addr<Channel>),
+}
 
-        ctx.spawn(
-            async move {
-                channel.send(msg).await.unwrap();
+impl<'a> MessageDestination<'a> {
+    pub fn get_destination_from_receiver<'b>(
+        server: &'a Server,
+        receiver: &Receiver<'b>,
+    ) -> Option<Self> {
+        match receiver {
+            Receiver::Channel(c) => server
+                .channels
+                .get(&c.to_string())
+                .cloned()
+                .map(move |c| Self::Channel(server, c)),
+            Receiver::User(_u) => todo!(),
+        }
+    }
+
+    pub fn send(self, ctx: &mut Context<Server>, msg: crate::entities::common_events::Message) {
+        match self {
+            Self::Channel(actor, channel) => {
+                ctx.spawn(
+                    async move {
+                        channel.send(msg).await.unwrap();
+                    }
+                    .into_actor(actor),
+                );
             }
-            .into_actor(self),
-        );
+            Self::User(_actor, _u) => todo!(),
+        }
     }
 }

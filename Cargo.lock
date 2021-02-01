@@ -3,7 +3,7 @@
 [[package]]
 name = "actix"
 version = "0.11.0-beta.1"
-source = "git+https://github.com/JordanForks/actix#6c04d4eab0b9bf883e85a9b5659ecdc00a609bc4"
+source = "git+https://github.com/JordanForks/actix#8799836f986644629bce700c1c17c3f13b0055ba"
 dependencies = [
  "actix-macros 0.1.3",
  "actix-rt",

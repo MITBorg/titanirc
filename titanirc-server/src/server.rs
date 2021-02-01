@@ -45,7 +45,8 @@ impl Handler<Connection> for Server {
         User::create(move |ctx| {
             let (read, write) = tokio::io::split(stream);
             let read = FramedRead::new(read, titanirc_codec::Decoder);
-            let write = FramedWrite::new(write, titanirc_codec::Encoder, ctx);
+            let write =
+                FramedWrite::new(write, titanirc_codec::Encoder::new("my.cool.server"), ctx);
 
             // Make our new `User` handle all events from this socket in `StreamHandler<Result<Command, _>>`.
             ctx.add_stream(read);

@@ -48,7 +48,20 @@ impl FrameDecoder for Decoder {
     }
 }
 
-pub struct Encoder;
+pub struct Encoder {
+    server_name: &'static str,
+    pub nick: Option<String>,
+}
+
+impl Encoder {
+    #[must_use]
+    pub fn new(server_name: &'static str) -> Self {
+        Self {
+            server_name,
+            nick: None,
+        }
+    }
+}
 
 impl tokio_util::codec::Encoder<titanirc_types::ServerMessage<'_>> for Encoder {
     type Error = std::io::Error;
@@ -58,7 +71,14 @@ impl tokio_util::codec::Encoder<titanirc_types::ServerMessage<'_>> for Encoder {
         item: titanirc_types::ServerMessage,
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
-        item.write("my.cool.server", "jordan", dst);
+        item.write(
+            &self.server_name,
+            match &self.nick {
+                Some(v) => v,
+                None => "*",
+            },
+            dst,
+        );
         dst.extend_from_slice(b"\r\n");
         Ok(())
     }

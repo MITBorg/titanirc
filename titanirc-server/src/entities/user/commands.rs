@@ -36,12 +36,14 @@ impl CommandHandler<NickCommand<'static>> for super::User {
         NickCommand { nick, .. }: NickCommand<'static>,
         _ctx: &mut Self::Context,
     ) {
+        self.nick = Some(std::str::from_utf8(&nick.0[..]).unwrap().to_string());
+        (*self.writer.encoder_mut()).nick = self.nick.clone();
+
         self.writer.write(titanirc_types::Reply::RplWelcome.into());
         self.writer.write(titanirc_types::Reply::RplYourHost.into());
         self.writer.write(titanirc_types::Reply::RplCreated.into());
         self.writer.write(titanirc_types::Reply::RplMyInfo.into());
         self.writer.write(titanirc_types::Reply::RplISupport.into());
-        self.nick = Some(std::str::from_utf8(&nick.0[..]).unwrap().to_string());
         // LUSERS
         // RPL_UMODEIS
         // MOTD

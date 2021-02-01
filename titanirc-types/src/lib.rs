@@ -29,6 +29,9 @@ macro_rules! define_commands {
         ),* $(,)?
     ) => {
         paste::paste! {
+            /// All the commands that can be ran by a client, also provides a `Display`
+            /// implementation that serialises the command for sending over the wire,
+            /// ie. for forwarding.
             #[derive(Debug)]
             pub enum Command<'a> {
                 $([<$name:camel>]([<$name:camel Command>]<'a>)),*
@@ -37,15 +40,16 @@ macro_rules! define_commands {
             $(const [<$name _BYTES>]: &[u8] = stringify!($name).as_bytes();)*
 
             impl Command<'_> {
+                /// Parses a command from the wire, returning an `Err` if the command was unparsable or
+                /// `Ok(None)` if the command was unrecognsied. The given `Bytes` should have the CRLF
+                /// stripped.
                 pub fn parse(input: Bytes) -> Result<Option<Self>, nom::Err<NomError<BytesWrapper>>> {
-                    let input = BytesWrapper::from(input);
+                    let mut input = BytesWrapper::from(input);
 
                     // skip the optional source at the start of the message
-                    let input = if let Ok((input, _)) = parse_optional_source(input.clone()) {
-                        input
-                    } else {
-                        input
-                    };
+                    if let Ok((input_source_stripped, _)) = parse_optional_source(input.clone()) {
+                        input = input_source_stripped;
+                    }
 
                     let (params, command) = take_till(|c| c == b' ')(input)?;
 
@@ -56,6 +60,7 @@ macro_rules! define_commands {
                 }
             }
 
+            /// Serialises the command for sending over the wire.
             impl std::fmt::Display for Command<'_> {
                 fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     match self {
@@ -72,6 +77,7 @@ macro_rules! define_commands {
                 }
 
                 impl [<$name:camel Command>]<'_> {
+                    /// Parses the command's arguments, with each parameter separated by a space.
                     #[allow(unused_variables)]
                     pub fn parse(rest: BytesWrapper) -> Result<Self, nom::Err<nom::error::Error<BytesWrapper>>> {
                         $(
@@ -88,6 +94,8 @@ macro_rules! define_commands {
                     }
                 }
 
+                /// Serialises the command's arguments for sending over the wire, joining
+                /// all the arguments separating them with a space.
                 impl std::fmt::Display for [<$name:camel Command>]<'_> {
                     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                         fmt.write_str(stringify!($name))?;

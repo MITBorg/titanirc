@@ -18,6 +18,8 @@ pub trait PrimitiveParser {
         Self: Sized;
 }
 
+/// A `Cow`-like implementation where `Owned` is a `bytes::Bytes` and `Borrowed`
+/// is `&[u8]`.
 #[derive(Debug, From)]
 pub enum BytesCow<'a> {
     Owned(Bytes),

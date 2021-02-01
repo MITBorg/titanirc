@@ -3,21 +3,37 @@
 use crate::{primitives::*, Command};
 use std::fmt::Write;
 
+/// The origin of a message that's about to be returned to the client.
 #[derive(Debug)]
 pub enum Source<'a> {
     User(Nick<'a>), // change Nick to whatever type nick!user@netmask is..
     Server,
 }
 
+impl<'a> From<Nick<'a>> for Source<'a> {
+    fn from(other: Nick<'a>) -> Self {
+        Self::User(other)
+    }
+}
+
+/// A message to be sent to the client over the wire.
 #[derive(Debug, derive_more::From)]
 pub enum ServerMessage<'a> {
+    /// A `RPL_*`/`ERR_*` type from the IRC spec.
     Reply(Reply<'a>),
+    /// Normally a 'forwarded' message, ie. a `VERSION` for another client or
+    /// a `PRIVMSG`.
     Command(Source<'a>, Command<'a>), // change Nick to whatever type nick!user@netmask is..
+    /// A server ping to the client.
     Ping,
+    /// A server pong to the client.
     Pong,
 }
 
 impl ServerMessage<'_> {
+    /// Writes out this `ServerMessage` to `dst`, in the expected format for the wire.
+    ///
+    /// This function omits the CRLF from the end of the line.
     pub fn write(self, server_name: &str, client_username: &str, dst: &mut bytes::BytesMut) {
         match self {
             Self::Reply(reply) => write!(
@@ -48,6 +64,7 @@ macro_rules! define_replies {
             $name:ident$(($($arg:ident$(<$($gen:tt),+>)?),*))? = $num:expr $(=> $msg:expr)?
         ),* $(,)?
     ) => {
+        /// A `RPL_*` or `ERR_*` type as defined in the IRC spec.
         #[derive(Debug)]
         #[allow(clippy::pub_enum_variant_names)]
         pub enum Reply<'a> {
@@ -56,6 +73,7 @@ macro_rules! define_replies {
             )*
         }
 
+        /// Outputs the `RPL_*`/`ERR_*` type for the wire as defined in the IRC spec.
         impl std::fmt::Display for Reply<'_> {
             fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 paste::paste! {
@@ -67,6 +85,7 @@ macro_rules! define_replies {
         }
 
         impl Reply<'_> {
+            /// The numeric code for this reply kind.
             #[must_use]
             pub fn code(&self) -> &'static str {
                 paste::paste! {

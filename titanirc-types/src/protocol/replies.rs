@@ -1,7 +1,6 @@
 #![allow(clippy::wildcard_imports)]
 
-use super::{commands::Command, primitives::*};
-use std::fmt::Write;
+use super::primitives::*;
 
 /// The origin of a message that's about to be returned to the client.
 #[derive(Debug)]

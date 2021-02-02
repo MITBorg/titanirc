@@ -1,9 +1,12 @@
-use crate::entities::{channel::Channel, user::User};
+use crate::entities::{
+    channel::{Channel, ChannelName},
+    user::User,
+};
 
 use std::{collections::HashMap, net::SocketAddr};
 
 use actix::{io::FramedWrite, prelude::*};
-use titanirc_types::{protocol::primitives::Receiver, RegisteredNick, UserIdent};
+use titanirc_types::RegisteredNick;
 use tokio::net::TcpStream;
 use tokio_util::codec::FramedRead;
 
@@ -15,7 +18,7 @@ use tokio_util::codec::FramedRead;
 /// Essentially acts as the middleman for each entity communicating with each other.
 pub struct Server {
     /// A list of known channels and the addresses to them.
-    pub channels: HashMap<String, Addr<Channel>>,
+    pub channels: HashMap<ChannelName, Addr<Channel>>,
     // A list of known connected users.
     // pub users: Vec<(UserIdent, Addr<User>)>,    // todo: add this when we know how auth is gonna work
 }
@@ -69,7 +72,7 @@ impl Handler<Connection> for Server {
 
 /// Sent by `User` actors to arbitrate access to the requested channel.
 impl Handler<crate::entities::channel::events::Join> for Server {
-    type Result = ResponseActFuture<Self, crate::entities::channel::events::JoinResult>;
+    type Result = ();
 
     // TODO: validate channel name
     fn handle(
@@ -79,70 +82,30 @@ impl Handler<crate::entities::channel::events::Join> for Server {
     ) -> Self::Result {
         // get the channel or create it if it doesn't already exist
         #[allow(clippy::option_if_let_else)]
-        let channel = if let Some(channel) = self.channels.get(&msg.channel_name) {
+        let channel = if let Some(channel) = self.channels.get(&msg.channel_name[..]) {
             channel
         } else {
-            let channel = Channel::create(|_ctx| Channel::new());
+            let channel_name = ChannelName::new(msg.channel_name.clone());
 
-            self.channels
-                .entry(msg.channel_name.clone())
-                .or_insert(channel)
+            let channel = Channel::create(|_ctx| Channel::new(channel_name.clone()));
+
+            self.channels.entry(channel_name).or_insert(channel)
         };
 
         // forward the user's join event onto the channel
-        Box::pin(
-            channel
-                .send(msg)
-                .into_actor(self)
-                .map(|v, _, _| v.map_err(|e| e.into()).and_then(|v| v)),
-        )
+        channel.do_send(msg);
     }
 }
 
-impl Handler<crate::entities::common_events::Message> for Server {
+impl Handler<crate::entities::common_events::UserMessage> for Server {
     type Result = ();
 
     fn handle(
         &mut self,
-        msg: crate::entities::common_events::Message,
-        ctx: &mut Self::Context,
+        _msg: crate::entities::common_events::UserMessage,
+        _ctx: &mut Self::Context,
     ) -> Self::Result {
-        let dest = MessageDestination::get_destination_from_receiver(&self, &msg.to).unwrap();
-        dest.send(ctx, msg);
-    }
-}
-
-pub enum MessageDestination<'a> {
-    User(&'a Server, Addr<User>),
-    Channel(&'a Server, Addr<Channel>),
-}
-
-impl<'a> MessageDestination<'a> {
-    pub fn get_destination_from_receiver<'b>(
-        server: &'a Server,
-        receiver: &Receiver<'b>,
-    ) -> Option<Self> {
-        match receiver {
-            Receiver::Channel(c) => server
-                .channels
-                .get(&c.to_string())
-                .cloned()
-                .map(move |c| Self::Channel(server, c)),
-            Receiver::User(_u) => todo!(),
-        }
-    }
-
-    pub fn send(self, ctx: &mut Context<Server>, msg: crate::entities::common_events::Message) {
-        match self {
-            Self::Channel(actor, channel) => {
-                ctx.spawn(
-                    async move {
-                        channel.send(msg).await.unwrap();
-                    }
-                    .into_actor(actor),
-                );
-            }
-            Self::User(_actor, _u) => todo!(),
-        }
+        // TODO: implement this when we have a `users` hashmap
+        todo!()
     }
 }

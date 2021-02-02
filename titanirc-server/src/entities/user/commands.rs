@@ -2,7 +2,7 @@
 
 use std::{sync::Arc, time::Instant};
 
-use actix::{Actor, AsyncContext, StreamHandler, WrapFuture};
+use actix::{Actor, AsyncContext, StreamHandler};
 use titanirc_types::protocol::{
     commands::{
         Command, JoinCommand, ModeCommand, MotdCommand, NickCommand, PrivmsgCommand, VersionCommand,
@@ -62,30 +62,13 @@ impl CommandHandler<JoinCommand<'static>> for super::User {
         ctx: &mut Self::Context,
     ) {
         // TODO: ensure the user has a nick set before they join a channel!!!
-
-        let server_addr = self.server.clone();
-        let ctx_addr = ctx.address();
-        let nick = self.nick.clone();
-        let user_uuid = self.session_id;
-
         // TODO: needs to send MODE & NAMES (353, 366)
-        ctx.spawn(
-            async move {
-                server_addr
-                    .send(crate::entities::channel::events::Join {
-                        channel_name: std::str::from_utf8(&channel.0[..]).unwrap().to_string(),
-                        user_uuid,
-                        user: ctx_addr,
-                        nick,
-                    })
-                    .await
-                    .unwrap()
-                    .unwrap();
-
-                println!("joined chan!");
-            }
-            .into_actor(self),
-        );
+        self.server.do_send(crate::entities::channel::events::Join {
+            channel_name: channel.to_bytes(),
+            user_uuid: self.session_id,
+            user: ctx.address(),
+            nick: self.nick.clone(),
+        });
     }
 }
 
@@ -141,24 +124,41 @@ impl CommandHandler<PrivmsgCommand<'static>> for super::User {
             free_text,
             ..
         }: PrivmsgCommand<'static>,
-        ctx: &mut Self::Context,
+        _ctx: &mut Self::Context,
     ) {
         // TODO: ensure the user has a nick before sending messages!!
+        match receiver {
+            primitives::Receiver::User(nick) => {
+                let msg = crate::entities::common_events::UserMessage(
+                    crate::entities::common_events::Message {
+                        from: self.nick.clone(),
+                        user_uuid: self.session_id,
+                        to: nick,
+                        message: free_text.to_string(),
+                    },
+                );
 
-        let msg = crate::entities::common_events::Message {
-            from: self.nick.clone(), // TODO: this need to be a full user string i think
-            user_uuid: self.session_id,
-            to: receiver,
-            message: free_text.to_string(),
-        };
-
-        let server_addr = self.server.clone();
-
-        ctx.spawn(
-            async move {
-                server_addr.send(msg).await.unwrap();
+                self.server.do_send(msg);
             }
-            .into_actor(self),
-        );
+            primitives::Receiver::Channel(channel_name) => {
+                if let Some(handle) = self.channels.get(channel_name.as_ref()) {
+                    // todo: specific channel event?
+                    let msg = crate::entities::common_events::ChannelMessage(
+                        crate::entities::common_events::Message {
+                            from: self.nick.clone(),
+                            user_uuid: self.session_id,
+                            to: channel_name,
+                            message: free_text.to_string(),
+                        },
+                    );
+
+                    // todo: should this be do_send?
+                    handle.message.do_send(msg).unwrap();
+                } else {
+                    // todo: error back to user if not in channel
+                    panic!("user not in channel")
+                }
+            }
+        }
     }
 }

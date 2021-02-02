@@ -1,7 +1,7 @@
 mod commands;
 pub mod events;
 
-use crate::{entities::channel::events::JoinBroadcast, server::Server};
+use crate::server::Server;
 
 use std::{collections::HashMap, hash::Hash, sync::Arc};
 
@@ -9,7 +9,7 @@ use actix::{
     io::{FramedWrite, WriteHandler},
     prelude::*,
 };
-use bytes::Bytes;
+
 use derive_more::Deref;
 use std::time::{Duration, Instant};
 use titanirc_types::{
@@ -21,6 +21,8 @@ use titanirc_types::{
 };
 use tokio::{io::WriteHalf, net::TcpStream};
 use uuid::Uuid;
+
+use super::channel::ChannelName;
 
 #[derive(Debug, Deref, Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::module_name_repetitions)]
@@ -36,7 +38,8 @@ pub struct User {
     >,
     pub last_active: Instant,
     pub nick: RegisteredNick,
-    pub channels: HashMap<Arc<String>, crate::entities::channel::Handle>,
+
+    pub channels: HashMap<ChannelName, crate::entities::channel::Handle>,
 }
 
 // TODO: broadcast a leave to all the user's channels on actor shutdown
@@ -84,37 +87,75 @@ impl Actor for User {
 /// Handles errors from our socket Writer.
 impl WriteHandler<std::io::Error> for User {}
 
-/// Handles `JoinBroadcast`s sent by a channel the user is in, and forwards a
-/// `JOIN` onto them.
-impl actix::Handler<Arc<JoinBroadcast>> for User {
+impl actix::Handler<crate::entities::channel::Handle> for User {
     type Result = ();
 
-    fn handle(&mut self, msg: Arc<JoinBroadcast>, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(
+        &mut self,
+        msg: crate::entities::channel::Handle,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.channels.insert(msg.channel_name.clone(), msg);
+    }
+}
+
+/// Handles `Join`s sent by a channel the user is in, and forwards a
+/// `JOIN` command to the user.
+impl actix::Handler<Arc<super::channel::events::Join>> for User {
+    type Result = ();
+
+    fn handle(
+        &mut self,
+        msg: Arc<super::channel::events::Join>,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
         self.writer.write(ServerMessage::Command(
             Source::User(Nick((*msg.nick.load().unwrap()).clone().into())),
             JoinCommand {
                 _phantom: std::marker::PhantomData,
-                channel: Channel(msg.channel_name.as_bytes().into()),
+                channel: Channel((&msg.channel_name[..]).into()),
             }
             .into(),
         ));
     }
 }
 
-impl actix::Handler<Arc<crate::entities::common_events::Message>> for User {
+/// Handles messages that have been forwarded from a channel to this user.
+impl actix::Handler<Arc<super::common_events::ChannelMessage>> for User {
     type Result = ();
 
     fn handle(
         &mut self,
-        msg: Arc<crate::entities::common_events::Message>,
+        msg: Arc<super::common_events::ChannelMessage>,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         self.writer.write(ServerMessage::Command(
-            Source::User(Nick((*msg.from.load().unwrap()).clone().into())),
+            Source::User(Nick((*msg.0.from.load().unwrap()).clone().into())),
             PrivmsgCommand {
                 _phantom: std::marker::PhantomData,
-                free_text: FreeText(msg.message.as_bytes().into()),
-                receiver: msg.to.clone(),
+                free_text: FreeText(msg.0.message.as_bytes().into()),
+                receiver: Receiver::Channel(msg.0.to.clone()),
+            }
+            .into(),
+        ));
+    }
+}
+
+/// Handles messages that have been sent directly to this user.
+impl actix::Handler<Arc<super::common_events::UserMessage>> for User {
+    type Result = ();
+
+    fn handle(
+        &mut self,
+        msg: Arc<super::common_events::UserMessage>,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.writer.write(ServerMessage::Command(
+            Source::User(Nick((*msg.0.from.load().unwrap()).clone().into())),
+            PrivmsgCommand {
+                _phantom: std::marker::PhantomData,
+                free_text: FreeText(msg.0.message.as_bytes().into()),
+                receiver: Receiver::User(msg.0.to.clone()),
             }
             .into(),
         ));

@@ -1,9 +1,12 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::missing_errors_doc)]
 
+mod config;
 mod entities;
 mod error;
 mod server;
+
+use std::path::PathBuf;
 
 use crate::{
     error::Result,
@@ -11,6 +14,7 @@ use crate::{
 };
 
 use actix::{Actor, AsyncContext, System};
+use clap::Clap;
 use displaydoc::Display;
 use thiserror::Error;
 use tokio::net::TcpListener;
@@ -19,11 +23,28 @@ use tokio::net::TcpListener;
 pub enum InitError {
     /// Failed to bind to socket: {0}
     TcpBind(std::io::Error),
+    /// Failed to read config file: {0}
+    ConfigRead(std::io::Error),
+    /// Failed to parse config file: {0}
+    ConfigParse(toml::de::Error),
+}
+
+#[derive(Clap)]
+#[clap(version = clap::crate_version!(), author = clap::crate_authors!())]
+struct Opts {
+    /// Path to config file
+    #[clap(short, long)]
+    config: PathBuf,
 }
 
 #[actix_rt::main]
 async fn main() -> Result<()> {
-    let listener = TcpListener::bind("0.0.0.0:6667")
+    let opts: Opts = Opts::parse();
+
+    let config = std::fs::read(&opts.config).map_err(InitError::ConfigRead)?;
+    let config: config::Config = toml::from_slice(&config).map_err(InitError::ConfigParse)?;
+
+    let listener = TcpListener::bind(&config.socket_address)
         .await
         .map_err(InitError::TcpBind)?;
 
@@ -43,7 +64,7 @@ async fn main() -> Result<()> {
         Server::new()
     });
 
-    println!("Running IRC server on 0.0.0.0:6667");
+    println!("Running IRC server on {}", &config.socket_address);
 
     tokio::signal::ctrl_c().await.expect("ctrl-c io");
     System::current().stop();

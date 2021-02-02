@@ -42,6 +42,8 @@ impl CommandHandler<NickCommand<'static>> for super::User {
         NickCommand { nick, .. }: NickCommand<'static>,
         _ctx: &mut Self::Context,
     ) {
+        // TODO: when authenticated, the user should only be allowed to /NICK themselves
+        //  to unregistered nicks or aliases.
         self.nick.set(Arc::new(nick.to_bytes()));
 
         self.writer.write(Reply::RplWelcome.into());

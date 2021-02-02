@@ -151,7 +151,7 @@ mod tests {
             Command::parse(Bytes::from_static(b"PRIVMSG foo :baz")),
             Ok(Some(Command::Privmsg(super::PrivmsgCommand {
                 receiver: super::Receiver::User(super::Nick(nick)),
-                free_text: super::primitives::FreeText(msg),
+                free_text: crate::protocol::primitives::FreeText(msg),
                 _phantom: std::marker::PhantomData,
             }))) if &*nick == b"foo" && &*msg == b"baz"
         ))
@@ -163,7 +163,7 @@ mod tests {
             Command::parse(Bytes::from_static(b":some-fake-source!dude@nice PRIVMSG foo :baz")),
             Ok(Some(Command::Privmsg(super::PrivmsgCommand {
                 receiver: super::Receiver::User(super::Nick(nick)),
-                free_text: super::primitives::FreeText(msg),
+                free_text: crate::protocol::primitives::FreeText(msg),
                 _phantom: std::marker::PhantomData,
             }))) if &*nick == b"foo" && &*msg == b"baz"
         ))

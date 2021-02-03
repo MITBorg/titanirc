@@ -39,6 +39,8 @@ pub struct User {
     pub last_active: Instant,
     pub nick: RegisteredNick,
 
+    pub password_auth_in_progress: Option<bytes::Bytes>,
+
     pub channels: HashMap<ChannelName, crate::entities::channel::Handle>,
 }
 
@@ -54,6 +56,7 @@ impl User {
             session_id: UserUuid(Uuid::new_v4()),
             server,
             writer,
+            password_auth_in_progress: None,
             last_active: Instant::now(),
             nick,
             channels: HashMap::new(),
@@ -86,6 +89,18 @@ impl Actor for User {
 
 /// Handles errors from our socket Writer.
 impl WriteHandler<std::io::Error> for User {}
+
+impl actix::Handler<crate::server::events::UserAuthResponse> for User {
+    type Result = ();
+
+    fn handle(
+        &mut self,
+        msg: crate::server::events::UserAuthResponse,
+        ctx: &mut Self::Context,
+    ) -> Self::Result {
+        todo!()
+    }
+}
 
 impl actix::Handler<crate::entities::channel::Handle> for User {
     type Result = ();

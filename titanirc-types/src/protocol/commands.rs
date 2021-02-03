@@ -115,6 +115,7 @@ macro_rules! define_commands {
 }
 
 define_commands! {
+    PASS(Password<'a>),
     USER(Username<'a>, HostName<'a>, ServerName<'a>, RealName<'a>),
     NICK(Nick<'a>),
 

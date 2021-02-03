@@ -95,6 +95,28 @@ macro_rules! free_text_primitive {
     };
 }
 
+macro_rules! free_text_primitive_no_colon {
+    ($name:ty) => {
+        impl PrimitiveParser for $name {
+            fn parse(bytes: BytesWrapper) -> IResult<BytesWrapper, Self> {
+                Ok((Bytes::new().into(), Self(bytes.into())))
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match std::str::from_utf8(&self.0[..]) {
+                    Ok(v) => f.write_str(v),
+                    Err(_e) => {
+                        eprintln!("Invalid utf-8 in {}", stringify!($name));
+                        Err(std::fmt::Error)
+                    }
+                }
+            }
+        }
+    };
+}
+
 macro_rules! space_terminated_primitive {
     ($name:ty) => {
         impl PrimitiveParser for $name {
@@ -178,6 +200,11 @@ impl ValidatingParser for Special {
         bytes.iter().all(|c| ALLOWED.contains(c))
     }
 }
+
+#[derive(Debug, Deref, Clone, From)]
+pub struct Password<'a>(pub BytesCow<'a>);
+free_text_primitive_no_colon!(Password<'_>);
+noop_validator!(Password<'_>);
 
 #[derive(Debug, Deref, Clone, From)]
 pub struct Username<'a>(pub BytesCow<'a>);

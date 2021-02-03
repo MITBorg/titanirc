@@ -17,6 +17,8 @@ use tokio_util::codec::FramedRead;
 ///
 /// Essentially acts as the middleman for each entity communicating with each other.
 pub struct Server {
+    sql_pool: sqlx::SqlitePool,
+
     /// A list of known channels and the addresses to them.
     pub channels: HashMap<ChannelName, Addr<Channel>>,
     // A list of known connected users.
@@ -24,8 +26,9 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new() -> Self {
+    pub fn new(sql_pool: sqlx::SqlitePool) -> Self {
         Self {
+            sql_pool,
             channels: HashMap::new(),
             // users: Vec::new(),
         }
@@ -107,5 +110,62 @@ impl Handler<crate::entities::common_events::UserMessage> for Server {
     ) -> Self::Result {
         // TODO: implement this when we have a `users` hashmap
         todo!()
+    }
+}
+
+impl Handler<events::UserAuth> for Server {
+    type Result = ();
+
+    fn handle(&mut self, msg: events::UserAuth, ctx: &mut Self::Context) -> Self::Result {
+        let conn = self.sql_pool.clone();
+
+        ctx.spawn(
+            async move {
+                match crate::models::user::User::fetch_by_nick(&conn, &msg.nick).await {
+                    Ok(Some(user)) => {
+                        if user.password_matches(&msg.password) {
+                            eprintln!("user authed");
+                        } else {
+                            eprintln!("user not authed");
+                        }
+                    }
+                    Ok(None) => {
+                        let passwd = msg.password.clone();
+                        if let Err(e) =
+                            crate::models::user::User::create_user(&conn, &msg.nick, passwd).await
+                        {
+                            eprintln!("failed to create user: {:?}", e);
+                        } else {
+                            eprintln!("successfully registered");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("failed to fetch by nick: {:?} ", e)
+                    }
+                }
+            }
+            .into_actor(self),
+        );
+    }
+}
+
+pub mod events {
+    use actix::{Addr, Message};
+
+    use crate::entities::user::User;
+
+    #[derive(Message)]
+    #[rtype(result = "")]
+    pub struct UserAuth {
+        pub user: Addr<User>,
+        pub nick: bytes::Bytes,
+        pub password: bytes::Bytes,
+    }
+
+    #[derive(Message)]
+    #[rtype(result = "")]
+    pub enum UserAuthResponse {
+        Valid,
+        InvalidPassword,
     }
 }

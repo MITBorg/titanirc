@@ -4,6 +4,7 @@
 mod config;
 mod entities;
 mod error;
+mod models;
 mod server;
 
 use std::path::PathBuf;
@@ -16,8 +17,11 @@ use crate::{
 use actix::{Actor, AsyncContext, System};
 use clap::Clap;
 use displaydoc::Display;
+use sqlx::migrate::Migrator;
 use thiserror::Error;
 use tokio::net::TcpListener;
+
+static MIGRATOR: Migrator = sqlx::migrate!();
 
 #[derive(Error, Debug, Display)]
 pub enum InitError {
@@ -27,6 +31,10 @@ pub enum InitError {
     ConfigRead(std::io::Error),
     /// Failed to parse config file: {0}
     ConfigParse(toml::de::Error),
+    /// Failed to connect to database: {0}
+    SqlConnect(sqlx::Error),
+    /// Failed to run migrations against the database: {0}
+    SqlMigrate(sqlx::migrate::MigrateError),
 }
 
 #[derive(Clap)]
@@ -43,6 +51,14 @@ async fn main() -> Result<()> {
 
     let config = std::fs::read(&opts.config).map_err(InitError::ConfigRead)?;
     let config: config::Config = toml::from_slice(&config).map_err(InitError::ConfigParse)?;
+
+    let sql_pool = sqlx::SqlitePool::connect(&config.database_uri)
+        .await
+        .map_err(InitError::SqlConnect)?;
+    MIGRATOR
+        .run(&sql_pool)
+        .await
+        .map_err(InitError::SqlMigrate)?;
 
     let listener = TcpListener::bind(&config.socket_address)
         .await
@@ -61,7 +77,7 @@ async fn main() -> Result<()> {
     // Spawn the server and pass connections from `stream` to `Handler<Connection>`.
     Server::create(move |ctx| {
         ctx.add_message_stream(stream);
-        Server::new()
+        Server::new(sql_pool)
     });
 
     println!("Running IRC server on {}", &config.socket_address);

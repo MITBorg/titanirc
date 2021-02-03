@@ -5,7 +5,8 @@ use std::{sync::Arc, time::Instant};
 use actix::{Actor, AsyncContext, StreamHandler};
 use titanirc_types::protocol::{
     commands::{
-        Command, JoinCommand, ModeCommand, MotdCommand, NickCommand, PrivmsgCommand, VersionCommand,
+        Command, JoinCommand, ModeCommand, MotdCommand, NickCommand, PassCommand, PrivmsgCommand,
+        VersionCommand,
     },
     primitives,
     replies::Reply,
@@ -24,6 +25,7 @@ impl StreamHandler<Result<Command<'static>, std::io::Error>> for super::User {
             Ok(Command::Join(v)) => self.handle_cmd(v, ctx),
             Ok(Command::Mode(v)) => self.handle_cmd(v, ctx),
             Ok(Command::Motd(v)) => self.handle_cmd(v, ctx),
+            Ok(Command::Pass(v)) => self.handle_cmd(v, ctx),
             Ok(Command::Privmsg(v)) => self.handle_cmd(v, ctx),
             Ok(Command::Version(v)) => self.handle_cmd(v, ctx),
             Ok(Command::Pong(_)) => {}
@@ -36,15 +38,27 @@ impl StreamHandler<Result<Command<'static>, std::io::Error>> for super::User {
 // TODO: all the 'raw' writes using byte strings below probably need to
 //  be wrapped in something a bit more friendly.
 
+impl CommandHandler<PassCommand<'static>> for super::User {
+    fn handle_cmd(&mut self, command: PassCommand<'static>, _ctx: &mut Self::Context) {
+        self.password_auth_in_progress = Some(command.password.to_bytes());
+    }
+}
+
 impl CommandHandler<NickCommand<'static>> for super::User {
     fn handle_cmd(
         &mut self,
         NickCommand { nick, .. }: NickCommand<'static>,
-        _ctx: &mut Self::Context,
+        ctx: &mut Self::Context,
     ) {
         // TODO: when authenticated, the user should only be allowed to /NICK themselves
         //  to unregistered nicks or aliases.
         self.nick.set(Arc::new(nick.to_bytes()));
+
+        self.server.do_send(crate::server::events::UserAuth {
+            nick: nick.to_bytes(),
+            user: ctx.address(),
+            password: self.password_auth_in_progress.clone().unwrap(),
+        });
 
         self.writer.write(Reply::RplWelcome.into());
         self.writer.write(Reply::RplYourHost.into());

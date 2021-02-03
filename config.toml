@@ -1,1 +1,2 @@
 socket_address = "0.0.0.0:6667"
+database_uri = "sqlite::memory:"

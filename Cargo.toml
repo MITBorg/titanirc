@@ -1,0 +1,22 @@
+[package]
+name = "titanircd"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix = "0.13"
+actix-rt = "2.7"
+anyhow = "1.0"
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tokio = { version = "1.23", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+irc-proto = "0.15"
+itertools = "0.10"
+
+[patch."crates-io"]
+irc-proto = { path = "../irc/irc-proto" }

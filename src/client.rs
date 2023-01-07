@@ -4,8 +4,9 @@ use actix::{
     fut::wrap_future, io::WriteHandler, Actor, ActorContext, ActorFutureExt, Addr, AsyncContext,
     Context, Handler, MessageResult, ResponseActFuture, Running, StreamHandler, WrapFuture,
 };
+use clap::{crate_name, crate_version};
 use futures::FutureExt;
-use irc_proto::{error::ProtocolError, ChannelExt, Command, Message};
+use irc_proto::{error::ProtocolError, ChannelExt, Command, Message, Response, Prefix};
 use tokio::time::Instant;
 use tracing::{debug, error, info_span, instrument, warn, Instrument, Span};
 
@@ -439,7 +440,20 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::NOTICE(_, _) => {}
             Command::MOTD(_) => {}
             Command::LUSERS(_, _) => {}
-            Command::VERSION(_) => {}
+            Command::VERSION(_) => {
+                self.writer.write(Message {
+                    tags: None,
+                    prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                    command: Command::Response(
+                        Response::RPL_VERSION,
+                        vec![
+                            self.connection.nick.to_string(),
+                            format!("{}-{}", crate_name!(), crate_version!()),
+                            SERVER_NAME.to_string(),
+                        ],
+                    ),
+                });
+            }
             Command::STATS(_, _) => {}
             Command::LINKS(_, _) => {}
             Command::TIME(_) => {}

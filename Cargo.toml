@@ -10,7 +10,7 @@ actix = "0.13"
 actix-rt = "2.7"
 anyhow = "1.0"
 chrono = "0.4"
-clap = { version = "4.0", features = ["cargo"] }
+clap = { version = "4.0", features = ["cargo", "derive", "std", "suggestions", "color"] }
 futures = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

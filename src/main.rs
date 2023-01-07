@@ -5,16 +5,18 @@ use std::collections::HashMap;
 
 use actix::{io::FramedWrite, Actor, Addr, AsyncContext};
 use actix_rt::System;
+use clap::Parser;
 use irc_proto::IrcCodec;
 use tokio::{net::TcpListener, time::Instant};
 use tokio_util::codec::FramedRead;
 use tracing::{error, info, info_span, Instrument};
 use tracing_subscriber::EnvFilter;
 
-use crate::{client::Client, messages::UserConnected, server::Server};
+use crate::{client::Client, config::Args, messages::UserConnected, server::Server};
 
 pub mod channel;
 pub mod client;
+pub mod config;
 pub mod connection;
 pub mod messages;
 pub mod server;
@@ -23,6 +25,20 @@ pub const SERVER_NAME: &str = "my.cool.server";
 
 #[actix_rt::main]
 async fn main() -> anyhow::Result<()> {
+    // parse CLI arguments
+    let opts: Args = Args::parse();
+
+    // overrides the RUST_LOG variable to our own value based on the
+    // amount of `-v`s that were passed when calling the service
+    std::env::set_var(
+        "RUST_LOG",
+        match opts.verbose {
+            1 => "debug",
+            2 => "trace",
+            _ => "info",
+        },
+    );
+
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .pretty();

@@ -6,7 +6,7 @@ use actix::{
 };
 use clap::{crate_name, crate_version};
 use futures::FutureExt;
-use irc_proto::{error::ProtocolError, ChannelExt, Command, Message, Response, Prefix};
+use irc_proto::{error::ProtocolError, ChannelExt, Command, Message, Prefix, Response};
 use tokio::time::Instant;
 use tracing::{debug, error, info_span, instrument, warn, Instrument, Span};
 

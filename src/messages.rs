@@ -54,7 +54,7 @@ pub struct ChannelPart {
 
 /// Retrieves the list of users currently in a channel.
 #[derive(Message)]
-#[rtype(result = "Vec<crate::connection::InitiatedConnection>")]
+#[rtype(result = "super::channel::response::ChannelNamesList")]
 pub struct ChannelList {
     pub span: Span,
 }

@@ -7,14 +7,14 @@ use actix::{
 use futures::FutureExt;
 use irc_proto::{error::ProtocolError, ChannelExt, Command, Message};
 use tokio::time::Instant;
-use tracing::{error, info_span, instrument, warn, Instrument, Span, debug};
+use tracing::{debug, error, info_span, instrument, warn, Instrument, Span};
 
 use crate::{
     channel::Channel,
     connection::{InitiatedConnection, MessageSink},
     messages::{
-        Broadcast, ChannelJoin, ChannelMessage, ChannelPart, FetchClientDetails, ServerDisconnect,
-        UserNickChange,
+        Broadcast, ChannelJoin, ChannelList, ChannelMessage, ChannelPart, FetchClientDetails,
+        ServerDisconnect, UserNickChange,
     },
     server::Server,
     SERVER_NAME,
@@ -133,7 +133,7 @@ impl Handler<FetchClientDetails> for Client {
 }
 
 /// A self-message from the Client's [`StreamHandler`] implementation when the user
-/// sends a request command out.
+/// sends a join command out.
 ///
 /// This will block the user from performing any actions until they're connected to the
 /// channel due to us awaiting on the join handles.
@@ -173,6 +173,45 @@ impl Handler<JoinChannelRequest> for Client {
         .map(|result, this, _ctx| {
             for (channel_name, handle) in result {
                 this.channels.insert(channel_name.clone(), handle);
+            }
+        });
+
+        Box::pin(fut)
+    }
+}
+
+/// A self-message from the Client's [`StreamHandler`] implementation when the user
+/// sends a request for each channel's member list.
+impl Handler<ListChannelMemberRequest> for Client {
+    type Result = ResponseActFuture<Self, ()>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ListChannelMemberRequest, _ctx: &mut Self::Context) -> Self::Result {
+        let mut futures = Vec::with_capacity(msg.channels.len());
+
+        // loop over all channels the user is connected to and fetch their members
+        for (channel_name, handle) in &self.channels {
+            if !msg.channels.contains(channel_name) {
+                continue;
+            }
+
+            futures.push(handle.send(ChannelList {
+                span: Span::current(),
+            }));
+        }
+
+        // await on all the `ChannelList` events to the channels, and once we get the lists back
+        // write them to the client
+        let fut = wrap_future::<_, Self>(
+            futures::future::join_all(futures.into_iter()).instrument(Span::current()),
+        )
+        .map(|result, this, _ctx| {
+            for list in result {
+                let list = list.unwrap();
+
+                for message in list.into_messages(this.connection.nick.clone()) {
+                    this.writer.write(message);
+                }
             }
         });
 
@@ -263,11 +302,7 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::SQUIT(_, _) => {}
             Command::JOIN(channel_names, _passwords, _real_name) => {
                 // split the list of channel names...
-                let channels = channel_names
-                    .split(',')
-                    .filter(|v| !v.is_empty())
-                    .map(ToString::to_string)
-                    .collect();
+                let channels = parse_channel_name_list(&channel_names);
 
                 // ...and send a self-notification to schedule those joins
                 ctx.notify(JoinChannelRequest {
@@ -290,7 +325,21 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             }
             Command::ChannelMODE(_, _) => {}
             Command::TOPIC(_, _) => {}
-            Command::NAMES(_, _) => {}
+            Command::NAMES(channel_names, _) => {
+                // split the list of channel names...
+                let channels = parse_channel_name_list(channel_names.as_deref().unwrap_or(""));
+
+                if channels.is_empty() {
+                    warn!("Client didn't request names for a particular channel");
+                    return;
+                }
+
+                // ...and send a self-notification to request each channel for their list
+                ctx.notify(ListChannelMemberRequest {
+                    channels,
+                    span: Span::current(),
+                });
+            }
             Command::LIST(_, _) => {}
             Command::INVITE(_, _) => {}
             Command::KICK(_, _, _) => {}
@@ -363,6 +412,13 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
     }
 }
 
+pub fn parse_channel_name_list(s: &str) -> Vec<String> {
+    s.split(',')
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
 /// Sent to us by actix whenever we fail to write a message to the client's outgoing tcp stream
 impl WriteHandler<ProtocolError> for Client {
     #[instrument(parent = &self.span, skip_all)]
@@ -372,10 +428,18 @@ impl WriteHandler<ProtocolError> for Client {
     }
 }
 
-/// An [`Client`] internal self-notification to schedule channel joining
+/// A [`Client`] internal self-notification to grab a list of users in each channel
 #[derive(actix::Message, Debug)]
 #[rtype(result = "()")]
-pub struct JoinChannelRequest {
+struct ListChannelMemberRequest {
+    channels: Vec<String>,
+    span: Span,
+}
+
+/// A [`Client`] internal self-notification to schedule channel joining
+#[derive(actix::Message, Debug)]
+#[rtype(result = "()")]
+struct JoinChannelRequest {
     channels: Vec<String>,
     span: Span,
 }

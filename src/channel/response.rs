@@ -8,6 +8,7 @@ pub struct ChannelTopic {
 }
 
 impl ChannelTopic {
+    #[must_use]
     pub fn new(channel: &Channel) -> Self {
         Self {
             channel_name: channel.name.to_string(),
@@ -15,8 +16,9 @@ impl ChannelTopic {
         }
     }
 
+    #[must_use]
     pub fn into_message(self, for_user: String) -> Message {
-        irc_proto::Message {
+        Message {
             tags: None,
             prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
             command: Command::Response(
@@ -29,10 +31,11 @@ impl ChannelTopic {
 
 pub struct ChannelNamesList {
     channel_name: String,
-    nick_list: Vec<String>,
+    pub nick_list: Vec<String>,
 }
 
 impl ChannelNamesList {
+    #[must_use]
     pub fn new(channel: &Channel) -> Self {
         Self {
             channel_name: channel.name.to_string(),
@@ -44,9 +47,18 @@ impl ChannelNamesList {
         }
     }
 
+    #[must_use]
+    pub const fn empty(channel_name: String) -> Self {
+        Self {
+            channel_name,
+            nick_list: vec![],
+        }
+    }
+
+    #[must_use]
     pub fn into_messages(self, for_user: String) -> Vec<Message> {
         vec![
-            irc_proto::Message {
+            Message {
                 tags: None,
                 prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
                 command: Command::Response(

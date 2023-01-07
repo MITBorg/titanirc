@@ -1,4 +1,4 @@
-mod response;
+pub mod response;
 
 use std::collections::HashMap;
 
@@ -12,9 +12,9 @@ use crate::{
     connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelJoin, ChannelList, ChannelMessage, ChannelPart, ServerDisconnect,
+        UserNickChange,
     },
 };
-use crate::messages::UserNickChange;
 
 /// A channel is an IRC channel (ie. #abc) that multiple users can connect to in order
 /// to chat together.
@@ -45,7 +45,7 @@ impl Handler<ChannelList> for Channel {
 
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: ChannelList, _ctx: &mut Self::Context) -> Self::Result {
-        MessageResult(self.clients.values().cloned().collect())
+        MessageResult(ChannelNamesList::new(self))
     }
 }
 

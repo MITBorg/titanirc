@@ -78,6 +78,7 @@ pub async fn negotiate_client_connection(
                 request.mode = Some(mode);
                 request.real_name = Some(real_name);
             }
+            Command::AUTHENTICATE(_) => {}
             Command::CAP(_, _, _, _) => {}
             _ => {
                 warn!(?msg, "Client sent unknown command during negotiation");

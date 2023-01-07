@@ -1,14 +1,20 @@
+pub mod response;
+
 use std::collections::{HashMap, HashSet};
 
 use actix::{Actor, Addr, Context, Handler, ResponseFuture};
-use futures::TryFutureExt;
+use futures::{stream::FuturesOrdered, TryFutureExt};
 use irc_proto::{Command, Message, Prefix, Response};
+use tokio_stream::StreamExt;
 use tracing::{instrument, Span};
 
 use crate::{
     channel::Channel,
     client::Client,
-    messages::{Broadcast, ChannelJoin, ServerDisconnect, UserConnected, UserNickChange},
+    messages::{
+        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
+        ServerDisconnect, UserConnected, UserNickChange,
+    },
     SERVER_NAME,
 };
 
@@ -122,6 +128,44 @@ impl Handler<UserNickChange> for Server {
         for client in &self.clients {
             client.do_send(msg.clone());
         }
+    }
+}
+
+impl Handler<ChannelList> for Server {
+    type Result = ResponseFuture<<ChannelList as actix::Message>::Result>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ChannelList, _ctx: &mut Self::Context) -> Self::Result {
+        let fut = self
+            .channels
+            .values()
+            .map(|channel| {
+                let fetch_topic = channel.send(ChannelFetchTopic {
+                    span: Span::current(),
+                });
+
+                let fetch_members = channel.send(ChannelMemberList {
+                    span: Span::current(),
+                });
+
+                futures::future::try_join(fetch_topic, fetch_members)
+            })
+            .collect::<FuturesOrdered<_>>()
+            .map(|res| {
+                let (topic, members) = res.unwrap();
+
+                response::ChannelListItem {
+                    channel_name: topic.channel_name,
+                    client_count: members.nick_list.len(),
+                    topic: topic.topic.map(|v| v.topic),
+                }
+            })
+            .fold(response::ChannelList::default(), |mut acc, v| {
+                acc.members.push(v);
+                acc
+            });
+
+        Box::pin(fut)
     }
 }
 

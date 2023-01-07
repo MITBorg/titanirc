@@ -33,6 +33,13 @@ pub struct UserNickChange {
     pub span: Span,
 }
 
+/// Fetches all the channels visible to the user.
+#[derive(Message, Clone)]
+#[rtype(result = "super::server::response::ChannelList")]
+pub struct ChannelList {
+    pub span: Span,
+}
+
 /// Sent when the user attempts to join a channel.
 #[derive(Message)]
 #[rtype(result = "Result<Addr<Channel>>")]
@@ -55,7 +62,7 @@ pub struct ChannelPart {
 /// Retrieves the list of users currently in a channel.
 #[derive(Message)]
 #[rtype(result = "super::channel::response::ChannelNamesList")]
-pub struct ChannelList {
+pub struct ChannelMemberList {
     pub span: Span,
 }
 

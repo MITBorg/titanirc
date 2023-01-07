@@ -12,7 +12,7 @@ use crate::{
     client::Client,
     connection::InitiatedConnection,
     messages::{
-        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMessage, ChannelPart,
+        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelMemberList, ChannelMessage, ChannelPart,
         ChannelUpdateTopic, ServerDisconnect, UserNickChange,
     },
 };
@@ -42,11 +42,11 @@ impl Handler<Broadcast> for Channel {
 }
 
 /// Sends back a list of users currently connected to the client
-impl Handler<ChannelList> for Channel {
-    type Result = MessageResult<ChannelList>;
+impl Handler<ChannelMemberList> for Channel {
+    type Result = MessageResult<ChannelMemberList>;
 
     #[instrument(parent = &msg.span, skip_all)]
-    fn handle(&mut self, msg: ChannelList, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: ChannelMemberList, _ctx: &mut Self::Context) -> Self::Result {
         MessageResult(ChannelNamesList::new(self))
     }
 }

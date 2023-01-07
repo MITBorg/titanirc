@@ -13,8 +13,8 @@ use crate::{
     channel::Channel,
     connection::{InitiatedConnection, MessageSink},
     messages::{
-        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMessage, ChannelPart,
-        ChannelUpdateTopic, FetchClientDetails, ServerDisconnect, UserNickChange,
+        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList, ChannelMessage,
+        ChannelPart, ChannelUpdateTopic, FetchClientDetails, ServerDisconnect, UserNickChange,
     },
     server::Server,
     SERVER_NAME,
@@ -195,12 +195,12 @@ impl Handler<ListChannelMemberRequest> for Client {
                 continue;
             }
 
-            futures.push(handle.send(ChannelList {
+            futures.push(handle.send(ChannelMemberList {
                 span: Span::current(),
             }));
         }
 
-        // await on all the `ChannelList` events to the channels, and once we get the lists back
+        // await on all the `ChannelMemberList` events to the channels, and once we get the lists back
         // write them to the client
         let fut = wrap_future::<_, Self>(
             futures::future::join_all(futures.into_iter()).instrument(Span::current()),
@@ -368,7 +368,21 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     span: Span::current(),
                 });
             }
-            Command::LIST(_, _) => {}
+            Command::LIST(_, _) => {
+                let span = Span::current();
+                let fut = self.server.send(ChannelList { span }).into_actor(self).map(
+                    |result, this, _ctx| {
+                        for message in result
+                            .unwrap()
+                            .into_messages(this.connection.nick.to_string())
+                        {
+                            this.writer.write(message);
+                        }
+                    },
+                );
+
+                ctx.spawn(fut);
+            }
             Command::INVITE(_, _) => {}
             Command::KICK(_, _, _) => {}
             Command::PRIVMSG(target, message) => {

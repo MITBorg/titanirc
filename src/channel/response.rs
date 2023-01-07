@@ -6,8 +6,8 @@ use crate::{
 };
 
 pub struct ChannelTopic {
-    channel_name: String,
-    topic: Option<CurrentChannelTopic>,
+    pub channel_name: String,
+    pub topic: Option<CurrentChannelTopic>,
 }
 
 impl ChannelTopic {
@@ -65,7 +65,7 @@ impl ChannelTopic {
 }
 
 pub struct ChannelNamesList {
-    channel_name: String,
+    pub channel_name: String,
     pub nick_list: Vec<String>,
 }
 

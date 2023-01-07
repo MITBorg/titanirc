@@ -16,7 +16,7 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelUpdateTopic, FetchClientDetails,
-        ServerDisconnect, UserKickedFromChannel, UserNickChange,
+        ServerDisconnect, ServerFetchMotd, UserKickedFromChannel, UserNickChange,
     },
     server::Server,
     SERVER_NAME,
@@ -438,7 +438,23 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                 }
             }
             Command::NOTICE(_, _) => {}
-            Command::MOTD(_) => {}
+            Command::MOTD(_) => {
+                let span = Span::current();
+                let fut = self
+                    .server
+                    .send(ServerFetchMotd { span })
+                    .into_actor(self)
+                    .map(|result, this, _ctx| {
+                        for message in result
+                            .unwrap()
+                            .into_messages(this.connection.nick.to_string())
+                        {
+                            this.writer.write(message);
+                        }
+                    });
+
+                ctx.spawn(fut);
+            }
             Command::LUSERS(_, _) => {}
             Command::VERSION(_) => {
                 self.writer.write(Message {

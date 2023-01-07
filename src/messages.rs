@@ -83,6 +83,13 @@ pub struct ChannelKickUser {
     pub reason: Option<String>,
 }
 
+/// Fetch the message of the day from the server.
+#[derive(Message)]
+#[rtype(result = "super::server::response::Motd")]
+pub struct ServerFetchMotd {
+    pub span: Span,
+}
+
 /// Sent from channels to users when a user is removed from the channel.
 #[derive(Message)]
 #[rtype(result = "()")]

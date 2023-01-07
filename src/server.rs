@@ -15,7 +15,7 @@ use crate::{
     connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
-        FetchClientByNick, ServerDisconnect, UserConnected, UserNickChange,
+        FetchClientByNick, ServerDisconnect, ServerFetchMotd, UserConnected, UserNickChange,
     },
     server::response::Motd,
     SERVER_NAME,
@@ -85,6 +85,16 @@ impl Handler<UserConnected> for Server {
         }
 
         self.clients.insert(msg.handle, msg.connection);
+    }
+}
+
+/// Returns the MOTD when requested.
+impl Handler<ServerFetchMotd> for Server {
+    type Result = MessageResult<ServerFetchMotd>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ServerFetchMotd, _ctx: &mut Self::Context) -> Self::Result {
+        MessageResult(Motd::new(self))
     }
 }
 

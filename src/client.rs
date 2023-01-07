@@ -13,9 +13,9 @@ use crate::{
     channel::Channel,
     connection::{InitiatedConnection, MessageSink},
     messages::{
-        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelKickUser, ChannelList, ChannelMemberList,
-        ChannelMessage, ChannelPart, ChannelUpdateTopic, FetchClientDetails, ServerDisconnect,
-        UserKickedFromChannel, UserNickChange,
+        Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
+        ChannelMemberList, ChannelMessage, ChannelPart, ChannelUpdateTopic, FetchClientDetails,
+        ServerDisconnect, UserKickedFromChannel, UserNickChange,
     },
     server::Server,
     SERVER_NAME,
@@ -394,7 +394,18 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
 
                 ctx.spawn(fut);
             }
-            Command::INVITE(_, _) => {}
+            Command::INVITE(nick, channel) => {
+                let Some(channel) = self.channels.get(&channel) else {
+                    error!(%channel, "User not connected to channel");
+                    return;
+                };
+
+                channel.do_send(ChannelInvite {
+                    nick,
+                    client: ctx.address(),
+                    span: Span::current(),
+                });
+            }
             Command::KICK(channel, users, reason) => {
                 let Some(channel) = self.channels.get(&channel) else {
                     error!(%channel, "User not connected to channel");

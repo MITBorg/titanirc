@@ -1,8 +1,8 @@
 pub mod response;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use actix::{Actor, Addr, Context, Handler, ResponseFuture};
+use actix::{Actor, Addr, AsyncContext, Context, Handler, MessageResult, ResponseFuture};
 use futures::{stream::FuturesOrdered, TryFutureExt};
 use irc_proto::{Command, Message, Prefix, Response};
 use tokio_stream::StreamExt;
@@ -11,9 +11,10 @@ use tracing::{instrument, Span};
 use crate::{
     channel::Channel,
     client::Client,
+    connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
-        ServerDisconnect, UserConnected, UserNickChange,
+        FetchClientByNick, ServerDisconnect, UserConnected, UserNickChange,
     },
     SERVER_NAME,
 };
@@ -22,7 +23,7 @@ use crate::{
 #[derive(Default)]
 pub struct Server {
     channels: HashMap<String, Addr<Channel>>,
-    clients: HashSet<Addr<Client>>,
+    clients: HashMap<Addr<Client>, InitiatedConnection>,
 }
 
 /// Received when a user connects to the server, and sends them the server preamble
@@ -74,7 +75,7 @@ impl Handler<UserConnected> for Server {
             });
         }
 
-        self.clients.insert(msg.handle);
+        self.clients.insert(msg.handle, msg.connection);
     }
 }
 
@@ -94,7 +95,7 @@ impl Handler<ChannelJoin> for Server {
     type Result = ResponseFuture<<ChannelJoin as actix::Message>::Result>;
 
     #[instrument(parent = &msg.span, skip_all)]
-    fn handle(&mut self, msg: ChannelJoin, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: ChannelJoin, ctx: &mut Self::Context) -> Self::Result {
         let channel = self
             .channels
             .entry(msg.channel_name.clone())
@@ -103,6 +104,7 @@ impl Handler<ChannelJoin> for Server {
                     name: msg.channel_name.clone(),
                     clients: HashMap::new(),
                     topic: None,
+                    server: ctx.address(),
                 }
                 .start()
             })
@@ -125,9 +127,29 @@ impl Handler<UserNickChange> for Server {
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: UserNickChange, _ctx: &mut Self::Context) -> Self::Result {
         // inform all clients of the nick change
-        for client in &self.clients {
+        for client in self.clients.keys() {
             client.do_send(msg.clone());
         }
+
+        if let Some(client) = self.clients.get_mut(&msg.client) {
+            *client = msg.connection;
+            client.nick = msg.new_nick;
+        }
+    }
+}
+
+/// Fetches a client's handle by their nick
+impl Handler<FetchClientByNick> for Server {
+    type Result = MessageResult<FetchClientByNick>;
+
+    fn handle(&mut self, msg: FetchClientByNick, _ctx: &mut Self::Context) -> Self::Result {
+        MessageResult(
+            // TODO: need O(1) lookup here
+            self.clients
+                .iter()
+                .find(|(_handle, connection)| connection.nick == msg.nick)
+                .map(|v| v.0.clone()),
+        )
     }
 }
 

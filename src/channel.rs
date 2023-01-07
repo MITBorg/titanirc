@@ -2,26 +2,32 @@ pub mod response;
 
 use std::collections::HashMap;
 
-use actix::{Actor, Addr, AsyncContext, Context, Handler, MessageResult};
+use actix::{
+    Actor, ActorFutureExt, Addr, AsyncContext, Context, Handler, MessageResult, ResponseActFuture,
+    WrapFuture,
+};
 use chrono::{DateTime, Utc};
+use futures::future::Either;
 use irc_proto::{Command, Message};
 use tracing::{debug, error, info, instrument, Span};
 
 use crate::{
-    channel::response::{ChannelNamesList, ChannelTopic},
+    channel::response::{ChannelInviteResult, ChannelNamesList, ChannelTopic},
     client::Client,
     connection::InitiatedConnection,
     messages::{
-        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelKickUser, ChannelMemberList,
-        ChannelMessage, ChannelPart, ChannelUpdateTopic, ServerDisconnect, UserKickedFromChannel,
-        UserNickChange,
+        Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser,
+        ChannelMemberList, ChannelMessage, ChannelPart, ChannelUpdateTopic, FetchClientByNick,
+        ServerDisconnect, UserKickedFromChannel, UserNickChange,
     },
+    server::Server,
 };
 
 /// A channel is an IRC channel (ie. #abc) that multiple users can connect to in order
 /// to chat together.
 pub struct Channel {
     pub name: String,
+    pub server: Addr<Server>,
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
     pub topic: Option<CurrentChannelTopic>,
 }
@@ -257,6 +263,64 @@ impl Handler<ChannelPart> for Channel {
         // send the part message to both the parting user and other clients
         msg.client.do_send(message.clone());
         ctx.notify(message);
+    }
+}
+
+impl Handler<ChannelInvite> for Channel {
+    type Result = ResponseActFuture<Self, ChannelInviteResult>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ChannelInvite, _ctx: &mut Self::Context) -> Self::Result {
+        let Some(source) = self.clients.get(&msg.client) else {
+            return Box::pin(futures::future::ready(ChannelInviteResult::NotOnChannel));
+        };
+
+        let source = source.to_nick();
+
+        let fut = self
+            .server
+            .send(FetchClientByNick {
+                nick: msg.nick.clone(),
+            })
+            .into_actor(self)
+            .then(|client, this, _ctx| {
+                let client = match client.unwrap() {
+                    Some(v) if this.clients.contains_key(&v) => {
+                        return Either::Left(futures::future::ready(
+                            ChannelInviteResult::UserAlreadyOnChannel,
+                        ))
+                        .into_actor(this);
+                    }
+                    Some(v) => v,
+                    None => {
+                        return Either::Left(futures::future::ready(
+                            ChannelInviteResult::NoSuchUser,
+                        ))
+                        .into_actor(this)
+                    }
+                };
+
+                let channel_name = this.name.to_string();
+
+                Either::Right(async move {
+                    client
+                        .send(Broadcast {
+                            message: Message {
+                                tags: None,
+                                prefix: Some(source),
+                                command: Command::INVITE(msg.nick, channel_name),
+                            },
+                            span: msg.span,
+                        })
+                        .await
+                        .unwrap();
+
+                    ChannelInviteResult::Successful
+                })
+                .into_actor(this)
+            });
+
+        Box::pin(fut)
     }
 }
 

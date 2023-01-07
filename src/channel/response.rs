@@ -117,3 +117,48 @@ impl ChannelNamesList {
         ]
     }
 }
+
+#[derive(Copy, Clone)]
+pub enum ChannelInviteResult {
+    Successful,
+    NoSuchUser,
+    UserAlreadyOnChannel,
+    NotOnChannel,
+}
+
+impl ChannelInviteResult {
+    #[must_use]
+    pub fn into_message(
+        self,
+        invited_user: String,
+        channel: String,
+        for_user: String,
+    ) -> Option<Message> {
+        let command = match self {
+            Self::Successful => Command::Response(
+                Response::RPL_INVITING,
+                vec![for_user, invited_user, channel],
+            ),
+            Self::NoSuchUser => return None,
+            Self::UserAlreadyOnChannel => Command::Response(
+                Response::ERR_USERONCHANNEL,
+                vec![
+                    for_user,
+                    invited_user,
+                    channel,
+                    "is already on channel".to_string(),
+                ],
+            ),
+            Self::NotOnChannel => Command::Response(
+                Response::ERR_NOTONCHANNEL,
+                vec![for_user, channel, "You're not on that channel".to_string()],
+            ),
+        };
+
+        Some(Message {
+            tags: None,
+            prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+            command,
+        })
+    }
+}

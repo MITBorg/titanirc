@@ -124,3 +124,19 @@ pub struct ChannelMessage {
     pub message: String,
     pub span: Span,
 }
+
+/// Invites a user to the channel.
+#[derive(Message)]
+#[rtype(result = "super::channel::response::ChannelInviteResult")]
+pub struct ChannelInvite {
+    pub nick: String,
+    pub client: Addr<Client>,
+    pub span: Span,
+}
+
+/// Fetches a client handle by nick from the server.
+#[derive(Message)]
+#[rtype(result = "Option<Addr<Client>>")]
+pub struct FetchClientByNick {
+    pub nick: String,
+}

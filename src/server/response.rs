@@ -1,5 +1,6 @@
-use crate::SERVER_NAME;
 use irc_proto::{Command, Message, Prefix, Response};
+
+use crate::SERVER_NAME;
 
 #[derive(Default)]
 pub struct ChannelList {

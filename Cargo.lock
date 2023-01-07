@@ -278,6 +278,7 @@ dependencies = [
 [[package]]
 name = "irc-proto"
 version = "0.15.0"
+source = "git+https://github.com/JordanForks/irc#923e080f2408ae301135e82549cff80e92aaa844"
 dependencies = [
  "bytes",
  "encoding",

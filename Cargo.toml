@@ -19,4 +19,4 @@ irc-proto = "0.15"
 itertools = "0.10"
 
 [patch."crates-io"]
-irc-proto = { path = "../irc/irc-proto" }
+irc-proto = { git = "https://github.com/JordanForks/irc" }

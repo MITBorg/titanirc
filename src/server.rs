@@ -11,19 +11,21 @@ use tracing::{instrument, Span};
 use crate::{
     channel::Channel,
     client::Client,
+    config::Config,
     connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
         FetchClientByNick, ServerDisconnect, UserConnected, UserNickChange,
     },
+    server::response::Motd,
     SERVER_NAME,
 };
 
 /// The root actor for arbitration between clients and channels.
-#[derive(Default)]
 pub struct Server {
-    channels: HashMap<String, Addr<Channel>>,
-    clients: HashMap<Addr<Client>, InitiatedConnection>,
+    pub channels: HashMap<String, Addr<Channel>>,
+    pub clients: HashMap<Addr<Client>, InitiatedConnection>,
+    pub config: Config,
 }
 
 /// Received when a user connects to the server, and sends them the server preamble
@@ -72,6 +74,13 @@ impl Handler<UserConnected> for Server {
                     prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
                     command: Command::Response(response, arguments),
                 },
+            });
+        }
+
+        for message in Motd::new(self).into_messages(msg.connection.nick.clone()) {
+            msg.handle.do_send(Broadcast {
+                span: Span::current(),
+                message,
             });
         }
 

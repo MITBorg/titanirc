@@ -1,6 +1,66 @@
 use irc_proto::{Command, Message, Prefix, Response};
 
-use crate::SERVER_NAME;
+use crate::{server::Server, SERVER_NAME};
+
+#[derive(Default)]
+pub struct Motd {
+    pub motd: Option<String>,
+}
+
+impl Motd {
+    #[must_use]
+    pub fn new(server: &Server) -> Self {
+        Self {
+            motd: server.config.motd.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn into_messages(self, for_user: String) -> Vec<Message> {
+        if let Some(motd) = self.motd {
+            let mut motd_messages = vec![Message {
+                tags: None,
+                prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                command: Command::Response(
+                    Response::RPL_MOTDSTART,
+                    vec![
+                        for_user.to_string(),
+                        format!("- {SERVER_NAME} Message of the day -"),
+                    ],
+                ),
+            }];
+
+            motd_messages.extend(motd.trim().split('\n').map(|v| Message {
+                tags: None,
+                prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                command: Command::Response(
+                    Response::RPL_MOTD,
+                    vec![for_user.to_string(), v.to_string()],
+                ),
+            }));
+
+            motd_messages.push(Message {
+                tags: None,
+                prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                command: Command::Response(
+                    Response::RPL_ENDOFMOTD,
+                    vec![for_user, "End of /MOTD command.".to_string()],
+                ),
+            });
+
+            motd_messages
+        } else {
+            vec![Message {
+                tags: None,
+                prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                command: Command::Response(
+                    Response::ERR_NOMOTD,
+                    vec![for_user, "MOTD File is missing".to_string()],
+                ),
+            }]
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct ChannelList {

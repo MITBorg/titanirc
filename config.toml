@@ -1,0 +1,11 @@
+listen-address = "[::]:6667"
+
+motd = """
+Welcome to our IRC server
+
+This network does NOT condone or allow any illegal
+activities.
+
+Any such occurrence of this activity will result
+in immediate bans and removal from the network.
+"""

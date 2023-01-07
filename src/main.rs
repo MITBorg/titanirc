@@ -44,12 +44,19 @@ async fn main() -> anyhow::Result<()> {
         .pretty();
     subscriber.init();
 
-    let server = Server::default().start();
-    let listener = TcpListener::bind("127.0.0.1:6697").await?;
+    let listen_address = opts.config.listen_address;
+
+    let server = Server {
+        channels: HashMap::default(),
+        clients: HashMap::default(),
+        config: opts.config,
+    }
+    .start();
+    let listener = TcpListener::bind(listen_address).await?;
 
     actix_rt::spawn(start_tcp_acceptor_loop(listener, server));
 
-    info!("Server listening on 127.0.0.1:6697");
+    info!("Server listening on {}", listen_address);
 
     tokio::signal::ctrl_c().await?;
     System::current().stop();

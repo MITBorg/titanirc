@@ -73,6 +73,24 @@ pub struct ChannelFetchTopic {
     pub span: Span,
 }
 
+/// Attempts to kick a user from a channel.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ChannelKickUser {
+    pub span: Span,
+    pub client: Addr<Client>,
+    pub user: String,
+    pub reason: Option<String>,
+}
+
+/// Sent from channels to users when a user is removed from the channel.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct UserKickedFromChannel {
+    pub channel: String,
+    pub span: Span,
+}
+
 /// Sent from a particular user to a channel when the user attempts to update the
 /// topic.
 #[derive(Message)]

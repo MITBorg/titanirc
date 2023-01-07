@@ -13,8 +13,9 @@ use crate::{
     channel::Channel,
     connection::{InitiatedConnection, MessageSink},
     messages::{
-        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList, ChannelMessage,
-        ChannelPart, ChannelUpdateTopic, FetchClientDetails, ServerDisconnect, UserNickChange,
+        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelKickUser, ChannelList, ChannelMemberList,
+        ChannelMessage, ChannelPart, ChannelUpdateTopic, FetchClientDetails, ServerDisconnect,
+        UserKickedFromChannel, UserNickChange,
     },
     server::Server,
     SERVER_NAME,
@@ -234,6 +235,16 @@ impl Handler<UserNickChange> for Client {
     }
 }
 
+/// Sent by channels when the current user is removed from it.
+impl Handler<UserKickedFromChannel> for Client {
+    type Result = ();
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: UserKickedFromChannel, _ctx: &mut Self::Context) -> Self::Result {
+        self.channels.remove(&msg.channel);
+    }
+}
+
 /// Receives messages from the user's incoming TCP stream and processes them, passing them onto
 /// other actors or self-notifying and calling a [`Handler`].
 impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
@@ -384,7 +395,21 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                 ctx.spawn(fut);
             }
             Command::INVITE(_, _) => {}
-            Command::KICK(_, _, _) => {}
+            Command::KICK(channel, users, reason) => {
+                let Some(channel) = self.channels.get(&channel) else {
+                    error!(%channel, "User not connected to channel");
+                    return;
+                };
+
+                for user in parse_channel_name_list(&users) {
+                    channel.do_send(ChannelKickUser {
+                        span: Span::current(),
+                        client: ctx.address(),
+                        user,
+                        reason: reason.clone(),
+                    });
+                }
+            }
             Command::PRIVMSG(target, message) => {
                 if !target.is_channel_name() {
                     // private message to another user

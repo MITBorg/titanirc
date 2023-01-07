@@ -2,7 +2,7 @@ use std::{collections::HashMap, time::Duration};
 
 use actix::{
     fut::wrap_future, io::WriteHandler, Actor, ActorContext, ActorFutureExt, Addr, AsyncContext,
-    Context, Handler, MessageResult, ResponseActFuture, Running, StreamHandler,
+    Context, Handler, MessageResult, ResponseActFuture, Running, StreamHandler, WrapFuture,
 };
 use futures::FutureExt;
 use irc_proto::{error::ProtocolError, ChannelExt, Command, Message};
@@ -13,8 +13,8 @@ use crate::{
     channel::Channel,
     connection::{InitiatedConnection, MessageSink},
     messages::{
-        Broadcast, ChannelJoin, ChannelList, ChannelMessage, ChannelPart, FetchClientDetails,
-        ServerDisconnect, UserNickChange,
+        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMessage, ChannelPart,
+        ChannelUpdateTopic, FetchClientDetails, ServerDisconnect, UserNickChange,
     },
     server::Server,
     SERVER_NAME,
@@ -324,7 +324,35 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                 });
             }
             Command::ChannelMODE(_, _) => {}
-            Command::TOPIC(_, _) => {}
+            Command::TOPIC(channel, topic) => {
+                let Some(channel) = self.channels.get(&channel) else {
+                    return;
+                };
+
+                #[allow(clippy::option_if_let_else)]
+                if let Some(topic) = topic {
+                    channel.do_send(ChannelUpdateTopic {
+                        topic,
+                        client: ctx.address(),
+                        span: Span::current(),
+                    });
+                } else {
+                    let span = Span::current();
+                    let fut = channel
+                        .send(ChannelFetchTopic { span })
+                        .into_actor(self)
+                        .map(|result, this, _ctx| {
+                            for message in result
+                                .unwrap()
+                                .into_messages(this.connection.nick.to_string(), false)
+                            {
+                                this.writer.write(message);
+                            }
+                        });
+
+                    ctx.spawn(fut);
+                }
+            }
             Command::NAMES(channel_names, _) => {
                 // split the list of channel names...
                 let channels = parse_channel_name_list(channel_names.as_deref().unwrap_or(""));

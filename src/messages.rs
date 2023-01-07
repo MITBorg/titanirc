@@ -59,6 +59,23 @@ pub struct ChannelList {
     pub span: Span,
 }
 
+/// Retrieves the current channel topic.
+#[derive(Message)]
+#[rtype(result = "super::channel::response::ChannelTopic")]
+pub struct ChannelFetchTopic {
+    pub span: Span,
+}
+
+/// Sent from a particular user to a channel when the user attempts to update the
+/// topic.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ChannelUpdateTopic {
+    pub topic: String,
+    pub client: Addr<Client>,
+    pub span: Span,
+}
+
 /// Sends a raw irc message to a channel/user.
 #[derive(Message, Clone)]
 #[rtype(result = "()")]

@@ -96,6 +96,7 @@ impl Handler<ChannelJoin> for Server {
                 Channel {
                     name: msg.channel_name.clone(),
                     clients: HashMap::new(),
+                    topic: None,
                 }
                 .start()
             })

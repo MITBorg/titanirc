@@ -1,10 +1,13 @@
 use irc_proto::{Command, Message, Prefix, Response};
 
-use crate::{channel::Channel, SERVER_NAME};
+use crate::{
+    channel::{Channel, CurrentChannelTopic},
+    SERVER_NAME,
+};
 
 pub struct ChannelTopic {
     channel_name: String,
-    topic: String,
+    topic: Option<CurrentChannelTopic>,
 }
 
 impl ChannelTopic {
@@ -12,19 +15,51 @@ impl ChannelTopic {
     pub fn new(channel: &Channel) -> Self {
         Self {
             channel_name: channel.name.to_string(),
-            topic: "hello world!".to_string(),
+            topic: channel.topic.clone(),
         }
     }
 
     #[must_use]
-    pub fn into_message(self, for_user: String) -> Message {
-        Message {
-            tags: None,
-            prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
-            command: Command::Response(
-                Response::RPL_TOPIC,
-                vec![for_user, self.channel_name, self.topic],
-            ),
+    pub fn into_messages(self, for_user: String, skip_on_none: bool) -> Vec<Message> {
+        if let Some(topic) = self.topic {
+            vec![
+                Message {
+                    tags: None,
+                    prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                    command: Command::Response(
+                        Response::RPL_TOPIC,
+                        vec![
+                            for_user.to_string(),
+                            self.channel_name.to_string(),
+                            topic.topic,
+                        ],
+                    ),
+                },
+                Message {
+                    tags: None,
+                    prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                    command: Command::Response(
+                        Response::RPL_TOPICWHOTIME,
+                        vec![
+                            for_user,
+                            self.channel_name.to_string(),
+                            topic.set_by,
+                            topic.set_time.timestamp().to_string(),
+                        ],
+                    ),
+                },
+            ]
+        } else if !skip_on_none {
+            vec![Message {
+                tags: None,
+                prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                command: Command::Response(
+                    Response::RPL_NOTOPIC,
+                    vec![for_user, self.channel_name, "No topic is set".to_string()],
+                ),
+            }]
+        } else {
+            vec![]
         }
     }
 }

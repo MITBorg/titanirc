@@ -3,16 +3,17 @@ pub mod response;
 use std::collections::HashMap;
 
 use actix::{Actor, Addr, AsyncContext, Context, Handler, MessageResult};
+use chrono::{DateTime, Utc};
 use irc_proto::Command;
-use tracing::{error, info, instrument, Span};
+use tracing::{debug, error, info, instrument, Span};
 
 use crate::{
     channel::response::{ChannelNamesList, ChannelTopic},
     client::Client,
     connection::InitiatedConnection,
     messages::{
-        Broadcast, ChannelJoin, ChannelList, ChannelMessage, ChannelPart, ServerDisconnect,
-        UserNickChange,
+        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMessage, ChannelPart,
+        ChannelUpdateTopic, ServerDisconnect, UserNickChange,
     },
 };
 
@@ -21,6 +22,7 @@ use crate::{
 pub struct Channel {
     pub name: String,
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
+    pub topic: Option<CurrentChannelTopic>,
 }
 
 impl Actor for Channel {
@@ -84,7 +86,7 @@ impl Handler<ChannelMessage> for Channel {
     }
 }
 
-/// Recieved when a user changes their nick.
+/// Received when a user changes their nick.
 impl Handler<UserNickChange> for Channel {
     type Result = ();
 
@@ -128,10 +130,12 @@ impl Handler<ChannelJoin> for Channel {
         }
 
         // send the channel's topic to the joining user
-        msg.client.do_send(Broadcast {
-            message: ChannelTopic::new(self).into_message(self.name.to_string()),
-            span: Span::current(),
-        });
+        for message in ChannelTopic::new(self).into_messages(self.name.to_string(), true) {
+            msg.client.do_send(Broadcast {
+                message,
+                span: Span::current(),
+            });
+        }
 
         // send the user list to the user
         for message in ChannelNamesList::new(self).into_messages(msg.connection.nick.to_string()) {
@@ -142,6 +146,46 @@ impl Handler<ChannelJoin> for Channel {
         }
 
         MessageResult(Ok(ctx.address()))
+    }
+}
+
+/// Updates the channel topic, as requested by a connected user.
+impl Handler<ChannelUpdateTopic> for Channel {
+    type Result = ();
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ChannelUpdateTopic, _ctx: &mut Self::Context) -> Self::Result {
+        let Some(client_info) = self.clients.get(&msg.client) else {
+            return;
+        };
+
+        debug!(msg.topic, "User is attempting to update channel topic");
+
+        self.topic = Some(CurrentChannelTopic {
+            topic: msg.topic,
+            set_by: client_info.nick.to_string(),
+            set_time: Utc::now(),
+        });
+
+        for (client, connection) in &self.clients {
+            for message in ChannelTopic::new(self).into_messages(connection.nick.to_string(), false)
+            {
+                client.do_send(Broadcast {
+                    message,
+                    span: Span::current(),
+                });
+            }
+        }
+    }
+}
+
+/// Returns the current channel topic to the user.
+impl Handler<ChannelFetchTopic> for Channel {
+    type Result = MessageResult<ChannelFetchTopic>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ChannelFetchTopic, _ctx: &mut Self::Context) -> Self::Result {
+        MessageResult(ChannelTopic::new(self))
     }
 }
 
@@ -193,4 +237,11 @@ impl Handler<ServerDisconnect> for Channel {
         // send the part message to all other clients
         ctx.notify(message);
     }
+}
+
+#[derive(Clone)]
+pub struct CurrentChannelTopic {
+    pub topic: String,
+    pub set_by: String,
+    pub set_time: DateTime<Utc>,
 }

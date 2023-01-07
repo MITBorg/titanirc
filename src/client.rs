@@ -504,6 +504,7 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
     }
 }
 
+#[must_use]
 pub fn parse_channel_name_list(s: &str) -> Vec<String> {
     s.split(',')
         .filter(|v| !v.is_empty())

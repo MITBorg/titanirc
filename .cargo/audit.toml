@@ -1,0 +1,9 @@
+[advisories]
+# advisory IDs to ignore e.g. ["RUSTSEC-2019-0001", ...]
+ignore = [
+    # potential segfault when using `chrono::Local::now()`, which we don't use
+    "RUSTSEC-2020-0159",
+    # similar to `RUSTSEC-2020-0159` but in the `time` crate. we don't use local times,
+    # preferring UTC everywhere so we're unaffected by this
+    "RUSTSEC-2020-0071"
+]

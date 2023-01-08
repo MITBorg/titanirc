@@ -23,7 +23,9 @@ use tokio_util::codec::FramedRead;
 use tracing::{error, info, info_span, Instrument};
 use tracing_subscriber::EnvFilter;
 
-use crate::{client::Client, config::Args, messages::UserConnected, server::Server};
+use crate::{
+    client::Client, config::Args, messages::UserConnected, persistence::Persistence, server::Server,
+};
 
 pub mod channel;
 pub mod client;
@@ -31,6 +33,7 @@ pub mod config;
 pub mod connection;
 pub mod database;
 pub mod messages;
+pub mod persistence;
 pub mod server;
 
 pub const SERVER_NAME: &str = "my.cool.server";
@@ -74,17 +77,24 @@ async fn main() -> anyhow::Result<()> {
     let listen_address = opts.config.listen_address;
     let client_threads = opts.config.client_threads;
 
-    let server = {
+    let server_arbiter = Arbiter::new();
+
+    let persistence = {
         let database = database.clone();
 
-        Supervisor::start_in_arbiter(&Arbiter::new().handle(), move |_ctx| Server {
-            channels: HashMap::default(),
-            clients: HashMap::default(),
-            channel_arbiters: build_arbiters(opts.config.channel_threads),
-            config: opts.config,
+        Supervisor::start_in_arbiter(&server_arbiter.handle(), move |_ctx| Persistence {
             database,
         })
     };
+
+    let server = Supervisor::start_in_arbiter(&server_arbiter.handle(), move |_ctx| Server {
+        channels: HashMap::default(),
+        clients: HashMap::default(),
+        channel_arbiters: build_arbiters(opts.config.channel_threads),
+        config: opts.config,
+        persistence,
+    });
+
     let listener = TcpListener::bind(listen_address).await?;
 
     actix_rt::spawn(start_tcp_acceptor_loop(

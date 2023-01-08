@@ -20,6 +20,7 @@ use crate::{
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelUpdateTopic, FetchClientByNick,
         ServerDisconnect, UserKickedFromChannel, UserNickChange,
     },
+    persistence::Persistence,
     server::Server,
 };
 
@@ -30,10 +31,18 @@ pub struct Channel {
     pub server: Addr<Server>,
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
     pub topic: Option<CurrentChannelTopic>,
+    pub persistence: Addr<Persistence>,
 }
 
 impl Actor for Channel {
     type Context = Context<Self>;
+
+    fn started(&mut self, _ctx: &mut Self::Context) {
+        self.persistence
+            .do_send(crate::persistence::events::ChannelCreated {
+                name: self.name.to_string(),
+            });
+    }
 }
 
 impl Supervised for Channel {}
@@ -122,6 +131,14 @@ impl Handler<ChannelJoin> for Channel {
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: ChannelJoin, ctx: &mut Self::Context) -> Self::Result {
         info!(self.name, msg.connection.nick, "User is joining channel");
+
+        // persist the user's join to the database
+        self.persistence
+            .do_send(crate::persistence::events::ChannelJoined {
+                channel_name: self.name.to_string(),
+                username: msg.connection.user.to_string(),
+                span: msg.span.clone(),
+            });
 
         self.clients
             .insert(msg.client.clone(), msg.connection.clone());
@@ -252,6 +269,14 @@ impl Handler<ChannelPart> for Channel {
         let Some(client_info) = self.clients.remove(&msg.client) else {
             return;
         };
+
+        // update the client's state in the database
+        self.persistence
+            .do_send(crate::persistence::events::ChannelParted {
+                channel_name: self.name.to_string(),
+                username: client_info.user.to_string(),
+                span: msg.span.clone(),
+            });
 
         let message = Broadcast {
             message: irc_proto::Message {

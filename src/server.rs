@@ -24,6 +24,7 @@ use crate::{
         FetchClientByNick, ServerDisconnect, ServerFetchMotd, UserConnected, UserNickChange,
         UserNickChangeInternal,
     },
+    persistence::Persistence,
     server::response::Motd,
     SERVER_NAME,
 };
@@ -34,7 +35,7 @@ pub struct Server {
     pub channels: HashMap<String, Addr<Channel>>,
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
     pub config: Config,
-    pub database: sqlx::Pool<sqlx::Any>,
+    pub persistence: Addr<Persistence>,
 }
 
 impl Supervised for Server {}
@@ -158,12 +159,14 @@ impl Handler<ChannelJoin> for Server {
 
                 let channel_name = msg.channel_name.clone();
                 let server = ctx.address();
+                let persistence = self.persistence.clone();
 
                 Supervisor::start_in_arbiter(&arbiter, move |_ctx| Channel {
                     name: channel_name,
                     clients: HashMap::new(),
                     topic: None,
                     server,
+                    persistence,
                 })
             })
             .clone();

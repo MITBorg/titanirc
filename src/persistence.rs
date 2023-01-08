@@ -3,7 +3,7 @@ pub mod events;
 use actix::{Context, Handler, ResponseFuture};
 use tracing::instrument;
 
-use crate::persistence::events::{ChannelCreated, ChannelJoined, ChannelParted};
+use crate::persistence::events::{ChannelCreated, ChannelJoined, ChannelParted, FetchUserChannels};
 
 /// Takes events destined for other actors and persists them to the database.
 pub struct Persistence {
@@ -78,6 +78,32 @@ impl Handler<ChannelParted> for Persistence {
             .execute(&conn)
             .await
             .unwrap();
+        })
+    }
+}
+
+impl Handler<FetchUserChannels> for Persistence {
+    type Result = ResponseFuture<Vec<String>>;
+
+    fn handle(&mut self, msg: FetchUserChannels, _ctx: &mut Self::Context) -> Self::Result {
+        let conn = self.database.clone();
+
+        Box::pin(async move {
+            sqlx::query_as(
+                "SELECT channels.name
+                  FROM channel_users
+                  INNER JOIN channels
+                    ON channels.id = channel_users.channel
+                  WHERE user = (SELECT id FROM users WHERE username = ?)
+                    AND in_channel = true",
+            )
+            .bind(msg.username)
+            .fetch_all(&conn)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(v,)| v)
+            .collect()
         })
     }
 }

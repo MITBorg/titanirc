@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
 
     let server_arbiter = Arbiter::new();
 
-    let persistence = {
+    let persistence_addr = {
         let database = database.clone();
 
         Supervisor::start_in_arbiter(&server_arbiter.handle(), move |_ctx| Persistence {
@@ -87,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
         })
     };
 
+    let persistence = persistence_addr.clone();
     let server = Supervisor::start_in_arbiter(&server_arbiter.handle(), move |_ctx| Server {
         channels: HashMap::default(),
         clients: HashMap::default(),
@@ -100,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
     actix_rt::spawn(start_tcp_acceptor_loop(
         listener,
         database,
+        persistence_addr,
         server,
         client_threads,
     ));
@@ -117,6 +119,7 @@ async fn main() -> anyhow::Result<()> {
 async fn start_tcp_acceptor_loop(
     listener: TcpListener,
     database: sqlx::Pool<sqlx::Any>,
+    persistence: Addr<Persistence>,
     server: Addr<Server>,
     client_threads: usize,
 ) {
@@ -131,6 +134,7 @@ async fn start_tcp_acceptor_loop(
         let database = database.clone();
         let server = server.clone();
         let client_arbiters = client_arbiters.clone();
+        let persistence = persistence.clone();
 
         actix_rt::spawn(async move {
             // split the stream into its read and write halves and setup codecs
@@ -170,6 +174,7 @@ async fn start_tcp_acceptor_loop(
                         graceful_shutdown: false,
                         server_leave_reason: None,
                         span,
+                        persistence,
                     }
                 })
             };

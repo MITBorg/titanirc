@@ -22,3 +22,10 @@ pub struct ChannelParted {
     pub username: String,
     pub span: Span,
 }
+
+#[derive(Message)]
+#[rtype(result = "Vec<String>")]
+pub struct FetchUserChannels {
+    pub username: String,
+    pub span: Span,
+}

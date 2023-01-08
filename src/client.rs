@@ -19,6 +19,7 @@ use crate::{
         ServerDisconnect, ServerFetchMotd, UserKickedFromChannel, UserNickChange,
         UserNickChangeInternal,
     },
+    persistence::{events::FetchUserChannels, Persistence},
     server::Server,
     SERVER_NAME,
 };
@@ -44,6 +45,8 @@ pub struct Client {
     /// The reason the client is leaving the server, whether this is set by the server or the user
     /// is decided by graceful_shutdown
     pub server_leave_reason: Option<String>,
+    /// Actor for persisting state to the datastore.
+    pub persistence: Addr<Persistence>,
     /// The connection span to group all logs for the same connection
     pub span: Span,
 }
@@ -71,6 +74,21 @@ impl Actor for Client {
                 command: Command::PING(SERVER_NAME.to_string(), None),
             });
         });
+
+        ctx.spawn(
+            self.persistence
+                .send(FetchUserChannels {
+                    username: self.connection.user.to_string(),
+                    span: Span::current(),
+                })
+                .into_actor(self)
+                .map(move |res, this, ctx| {
+                    ctx.notify(JoinChannelRequest {
+                        channels: res.unwrap(),
+                        span: this.span.clone(),
+                    });
+                }),
+        );
     }
 
     /// Called when the actor is shutting down, either gracefully by the client or forcefully

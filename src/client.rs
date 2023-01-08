@@ -12,7 +12,7 @@ use tracing::{debug, error, info_span, instrument, warn, Instrument, Span};
 
 use crate::{
     channel::Channel,
-    connection::{InitiatedConnection, MessageSink},
+    connection::{InitiatedConnection, MessageSink, SaslAlreadyAuthenticated},
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelUpdateTopic, FetchClientDetails,
@@ -569,7 +569,11 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::BOTSERV(_) => {}
             Command::HOSTSERV(_) => {}
             Command::MEMOSERV(_) => {}
-            Command::AUTHENTICATE(_) => {}
+            Command::AUTHENTICATE(_) => {
+                self.writer.write(
+                    SaslAlreadyAuthenticated(self.connection.nick.to_string()).into_message(),
+                );
+            }
             Command::ACCOUNT(_) => {}
             Command::METADATA(_, _, _) => {}
             Command::MONITOR(_, _) => {}

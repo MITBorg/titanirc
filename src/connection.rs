@@ -343,6 +343,26 @@ impl FromStr for AuthStrategy {
     }
 }
 
+/// Returned to the client if they try to call AUTHENTICATE again after negotiation.
+pub struct SaslAlreadyAuthenticated(pub String);
+
+impl SaslAlreadyAuthenticated {
+    #[must_use]
+    pub fn into_message(self) -> Message {
+        Message {
+            tags: None,
+            prefix: None,
+            command: Command::Response(
+                Response::ERR_SASLALREADY,
+                vec![
+                    self.0,
+                    "You have already authenticated using SASL".to_string(),
+                ],
+            ),
+        }
+    }
+}
+
 /// Returned to the client when an invalid SASL strategy is attempted.
 pub struct SaslStrategyUnsupported(String);
 

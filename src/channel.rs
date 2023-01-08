@@ -43,7 +43,7 @@ impl Handler<Broadcast> for Channel {
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: Broadcast, _ctx: &mut Self::Context) -> Self::Result {
         for client in self.clients.keys() {
-            client.try_send(msg.clone()).unwrap();
+            client.do_send(msg.clone());
         }
     }
 }

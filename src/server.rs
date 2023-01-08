@@ -3,8 +3,10 @@ pub mod response;
 use std::collections::HashMap;
 
 use actix::{Actor, Addr, AsyncContext, Context, Handler, MessageResult, ResponseFuture};
+use actix_rt::Arbiter;
 use futures::{stream::FuturesOrdered, TryFutureExt};
 use irc_proto::{Command, Message, Prefix, Response};
+use rand::seq::SliceRandom;
 use tokio_stream::StreamExt;
 use tracing::{debug, instrument, warn, Span};
 
@@ -24,6 +26,7 @@ use crate::{
 
 /// The root actor for arbitration between clients and channels.
 pub struct Server {
+    pub channel_arbiters: Vec<Arbiter>,
     pub channels: HashMap<String, Addr<Channel>>,
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
     pub config: Config,
@@ -137,13 +140,20 @@ impl Handler<ChannelJoin> for Server {
             .channels
             .entry(msg.channel_name.clone())
             .or_insert_with(|| {
-                Channel {
-                    name: msg.channel_name.clone(),
+                let arbiter = self
+                    .channel_arbiters
+                    .choose(&mut rand::thread_rng())
+                    .map_or_else(Arbiter::current, Arbiter::handle);
+
+                let channel_name = msg.channel_name.clone();
+                let server = ctx.address();
+
+                Channel::start_in_arbiter(&arbiter, move |_ctx| Channel {
+                    name: channel_name,
                     clients: HashMap::new(),
                     topic: None,
-                    server: ctx.address(),
-                }
-                .start()
+                    server,
+                })
             })
             .clone();
 

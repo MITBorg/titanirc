@@ -81,7 +81,7 @@ impl Actor for Client {
         ctx.spawn(
             self.persistence
                 .send(FetchUserChannels {
-                    username: self.connection.user.to_string(),
+                    user_id: self.connection.user_id,
                     span: Span::current(),
                 })
                 .into_actor(self)
@@ -185,7 +185,7 @@ impl Handler<JoinChannelRequest> for Client {
 
             let channel_messages_fut = self.persistence.send(FetchUnseenMessages {
                 channel_name: channel_name.to_string(),
-                username: self.connection.user.to_string(),
+                user_id: self.connection.user_id,
                 span: Span::current(),
             });
 
@@ -203,18 +203,15 @@ impl Handler<JoinChannelRequest> for Client {
         let fut = wrap_future::<_, Self>(
             futures::future::join_all(futures.into_iter()).instrument(Span::current()),
         )
-        .map(|result, this, ctx| {
+        .map(|result, this, _ctx| {
             for (channel_name, handle, messages) in result {
                 this.channels.insert(channel_name.clone(), handle);
 
                 for (source, message) in messages {
-                    ctx.notify(Broadcast {
-                        message: Message {
-                            tags: None,
-                            prefix: Some(Prefix::new_from_str(&source)),
-                            command: Command::PRIVMSG(channel_name.clone(), message),
-                        },
-                        span: this.span.clone(),
+                    this.writer.write(Message {
+                        tags: None,
+                        prefix: Some(Prefix::new_from_str(&source)),
+                        command: Command::PRIVMSG(channel_name.clone(), message),
                     });
                 }
             }

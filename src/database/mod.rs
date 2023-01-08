@@ -1,49 +1,29 @@
 use argon2::{password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use rand::rngs::OsRng;
-use sqlx::{database::HasArguments, Database, Encode, Executor, FromRow, IntoArguments, Type};
 
-/// Fetches the given user's password from the database.
-pub async fn fetch_password_hash<'a, E: Executor<'a>>(
-    conn: E,
-    username: &'a str,
-) -> Result<Option<String>, sqlx::Error>
-where
-    for<'b> &'b str: Type<E::Database> + Encode<'b, E::Database>,
-    <E::Database as HasArguments<'a>>::Arguments: IntoArguments<'a, E::Database>,
-    for<'b> (String,): FromRow<'b, <E::Database as Database>::Row>,
-{
-    let res = sqlx::query_as("SELECT password FROM users WHERE username = ?")
-        .bind(username)
-        .fetch_optional(conn)
-        .await?
-        .map(|(v,)| v);
-
-    Ok(res)
-}
-
-/// Creates a new user, returning an error if the user already exists.
-pub async fn create_user<'a, E: Executor<'a>>(
-    conn: E,
-    username: &'a str,
+/// Attempts creation of a new user, returning the password of the user.
+///
+/// The returned password _is not_ guaranteed to be the password that was just set.
+pub async fn create_user_or_fetch_password_hash(
+    conn: &sqlx::Pool<sqlx::Any>,
+    username: &str,
     password: &[u8],
-) -> Result<(), sqlx::Error>
-where
-    for<'b> &'b str: Type<E::Database> + Encode<'b, E::Database>,
-    for<'b> String: Type<E::Database> + Encode<'b, E::Database>,
-    <E::Database as HasArguments<'a>>::Arguments: IntoArguments<'a, E::Database>,
-{
-    let salt = SaltString::generate(&mut OsRng);
+) -> Result<(i64, String), sqlx::Error> {
     let password_hash = Argon2::default()
-        .hash_password(password, &salt)
+        .hash_password(password, &SaltString::generate(&mut OsRng))
         .unwrap()
         .to_string();
 
-    sqlx::query("INSERT INTO users (username, password) VALUES (?, ?)")
-        .bind(username)
-        .bind(password_hash)
-        .execute(conn)
-        .await
-        .map(|_| ())
+    sqlx::query_as(
+        "INSERT INTO users (username, password)
+         VALUES (?, ?)
+         ON CONFLICT(username) DO UPDATE SET username = username
+         RETURNING id, password",
+    )
+    .bind(username)
+    .bind(password_hash)
+    .fetch_one(conn)
+    .await
 }
 
 /// Compares a password to a hash stored in the database.

@@ -48,11 +48,11 @@ impl Handler<ChannelJoined> for Persistence {
         Box::pin(async move {
             sqlx::query(
                 "INSERT INTO channel_users (channel, user, permissions, in_channel)
-                 VALUES ((SELECT id FROM channels WHERE name = ?), (SELECT id FROM users WHERE username = ?), ?, ?)
-                 ON CONFLICT(channel, user) DO UPDATE SET in_channel = excluded.in_channel"
+                 VALUES ((SELECT id FROM channels WHERE name = ?), ?, ?, ?)
+                 ON CONFLICT(channel, user) DO UPDATE SET in_channel = excluded.in_channel",
             )
             .bind(msg.channel_name)
-            .bind(msg.username)
+            .bind(msg.user_id.0)
             .bind(0i32)
             .bind(true)
             .execute(&conn)
@@ -75,10 +75,10 @@ impl Handler<ChannelParted> for Persistence {
                 "UPDATE channel_users
                  SET in_channel = false
                  WHERE channel = (SELECT id FROM channels WHERE name = ?)
-                   AND user = (SELECT id FROM users WHERE username = ?)",
+                   AND user = ?",
             )
             .bind(msg.channel_name)
-            .bind(msg.username)
+            .bind(msg.user_id.0)
             .execute(&conn)
             .await
             .unwrap();
@@ -101,7 +101,7 @@ impl Handler<FetchUserChannels> for Persistence {
                   WHERE user = (SELECT id FROM users WHERE username = ?)
                     AND in_channel = true",
             )
-            .bind(msg.username)
+            .bind(msg.user_id.0)
             .fetch_all(&conn)
             .await
             .unwrap()
@@ -137,20 +137,22 @@ impl Handler<ChannelMessage> for Persistence {
             .await
             .unwrap();
 
-            let query = format!(
-                "UPDATE channel_users
-                 SET last_seen_message_idx = ?
-                 WHERE channel = ?
-                   AND user IN (SELECT id FROM users WHERE username IN ({}))",
-                msg.receivers.iter().map(|_| "?").join(",")
-            );
+            if !msg.receivers.is_empty() {
+                let query = format!(
+                    "UPDATE channel_users
+                     SET last_seen_message_idx = ?
+                     WHERE channel = ?
+                       AND user IN ({})",
+                    msg.receivers.iter().map(|_| "?").join(",")
+                );
 
-            let mut query = sqlx::query(&query).bind(idx).bind(channel);
-            for receiver in msg.receivers {
-                query = query.bind(receiver);
+                let mut query = sqlx::query(&query).bind(idx).bind(channel);
+                for receiver in msg.receivers {
+                    query = query.bind(receiver.0);
+                }
+
+                query.execute(&conn).await.unwrap();
             }
-
-            query.execute(&conn).await.unwrap();
         })
     }
 }
@@ -180,13 +182,13 @@ impl Handler<FetchUnseenMessages> for Persistence {
                             SELECT last_seen_message_idx
                             FROM channel_users
                             WHERE channel = (SELECT id FROM channel)
-                              AND user = (SELECT id FROM users WHERE username = ?)
+                              AND user = ?
                         )
                     )
-                 ORDER BY idx DESC",
+                 ORDER BY idx ASC",
             )
             .bind(msg.channel_name.to_string())
-            .bind(msg.username.to_string())
+            .bind(msg.user_id.0)
             .fetch_all(&conn)
             .await
             .unwrap();

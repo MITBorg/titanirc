@@ -25,6 +25,9 @@ pub type MessageSink = FramedWrite<Message, WriteHalf<TcpStream>, irc_proto::Irc
 
 pub const SUPPORTED_CAPABILITIES: &[&str] = &[concatcp!("sasl=", AuthStrategy::SUPPORTED)];
 
+#[derive(Copy, Clone, Debug)]
+pub struct UserId(pub i64);
+
 #[derive(Default)]
 pub struct ConnectionRequest {
     nick: Option<String>,
@@ -39,6 +42,7 @@ pub struct InitiatedConnection {
     pub user: String,
     pub mode: String,
     pub real_name: String,
+    pub user_id: UserId,
 }
 
 impl InitiatedConnection {
@@ -70,6 +74,7 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
             user,
             mode,
             real_name,
+            user_id: UserId(0),
         })
     }
 }
@@ -136,7 +141,7 @@ pub async fn negotiate_client_connection(
 
     // if the user closed the connection before the connection was fully established,
     // return back early
-    let Some(initiated) = initiated else {
+    let Some(mut initiated) = initiated else {
         return Ok(None);
     };
 
@@ -147,7 +152,7 @@ pub async fn negotiate_client_connection(
         )));
     }
 
-    let mut has_authenticated = false;
+    let mut user_id = None;
 
     // start negotiating capabilities with the client
     while let Some(msg) = s.try_next().await? {
@@ -161,7 +166,7 @@ pub async fn negotiate_client_connection(
                 break;
             }
             Command::AUTHENTICATE(strategy) => {
-                has_authenticated =
+                user_id =
                     start_authenticate_flow(s, write, &initiated, strategy, &database).await?;
             }
             _ => {
@@ -173,7 +178,9 @@ pub async fn negotiate_client_connection(
         }
     }
 
-    if has_authenticated {
+    if let Some(user_id) = user_id {
+        initiated.user_id.0 = user_id;
+
         Ok(Some(initiated))
     } else {
         Err(ProtocolError::Io(Error::new(
@@ -193,11 +200,11 @@ async fn start_authenticate_flow(
     connection: &InitiatedConnection,
     strategy: String,
     database: &sqlx::Pool<sqlx::Any>,
-) -> Result<bool, ProtocolError> {
+) -> Result<Option<i64>, ProtocolError> {
     let Ok(auth_strategy) = AuthStrategy::from_str(&strategy) else {
         write.send(SaslStrategyUnsupported(connection.nick.to_string()).into_message())
             .await?;
-        return Ok(false);
+        return Ok(None);
     };
 
     // tell the client to go ahead with their authentication
@@ -226,7 +233,7 @@ async fn start_authenticate_flow(
             break;
         }
 
-        let authenticated = match auth_strategy {
+        let user_id = match auth_strategy {
             AuthStrategy::Plain => {
                 // TODO: this needs to deal with the case where the full arguments can be split over
                 //  multiple messages
@@ -234,12 +241,12 @@ async fn start_authenticate_flow(
             }
         };
 
-        if authenticated {
+        if user_id.is_some() {
             for message in SaslSuccess(connection.clone()).into_messages() {
                 write.send(message).await?;
             }
 
-            return Ok(true);
+            return Ok(user_id);
         }
 
         write
@@ -247,18 +254,20 @@ async fn start_authenticate_flow(
             .await?;
     }
 
-    Ok(false)
+    Ok(None)
 }
 
 /// Attempts to handle an `AUTHENTICATE` command for the `PLAIN` authentication method.
 ///
 /// This will parse the full message, ensure that the identity is correct and compare the hashes
 /// to what we have stored in the database.
+///
+/// This function will return the authenticated user id, or none if the password was incorrect.
 pub async fn handle_plain_authentication(
     arguments: &str,
     connection: &InitiatedConnection,
     database: &sqlx::Pool<sqlx::Any>,
-) -> Result<bool, Error> {
+) -> Result<Option<i64>, Error> {
     let arguments = BASE64_STANDARD
         .decode(arguments)
         .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
@@ -277,26 +286,16 @@ pub async fn handle_plain_authentication(
     }
 
     // lookup the user's password based on the USER command they sent earlier
-    let password_hash = crate::database::fetch_password_hash(database, &connection.user)
-        .await
-        .unwrap();
-    let password_hash = password_hash
-        .as_deref()
-        .map(PasswordHash::new)
-        .transpose()
-        .unwrap();
-    let Some(password_hash) = password_hash else {
-        // this is a new user, so we'll create an account for them
-        // TODO: we need to deal with races here, right now we'll just error out on dup
-        crate::database::create_user(database, &connection.user, password).await.unwrap();
-
-        return Ok(true);
-    };
+    let (user_id, password_hash) =
+        crate::database::create_user_or_fetch_password_hash(database, &connection.user, password)
+            .await
+            .unwrap();
+    let password_hash = PasswordHash::new(&password_hash).unwrap();
 
     // check the user's password
     match verify_password(password, &password_hash) {
-        Ok(()) => Ok(true),
-        Err(argon2::password_hash::Error::Password) => Ok(false),
+        Ok(()) => Ok(Some(user_id)),
+        Err(argon2::password_hash::Error::Password) => Ok(None),
         Err(e) => Err(Error::new(ErrorKind::InvalidData, e.to_string())),
     }
 }

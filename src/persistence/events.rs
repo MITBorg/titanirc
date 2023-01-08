@@ -1,6 +1,8 @@
 use actix::Message;
 use tracing::Span;
 
+use crate::connection::UserId;
+
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct ChannelCreated {
@@ -11,7 +13,7 @@ pub struct ChannelCreated {
 #[rtype(result = "()")]
 pub struct ChannelJoined {
     pub channel_name: String,
-    pub username: String,
+    pub user_id: UserId,
     pub span: Span,
 }
 
@@ -19,14 +21,14 @@ pub struct ChannelJoined {
 #[rtype(result = "()")]
 pub struct ChannelParted {
     pub channel_name: String,
-    pub username: String,
+    pub user_id: UserId,
     pub span: Span,
 }
 
 #[derive(Message)]
 #[rtype(result = "Vec<String>")]
 pub struct FetchUserChannels {
-    pub username: String,
+    pub user_id: UserId,
     pub span: Span,
 }
 
@@ -36,13 +38,13 @@ pub struct ChannelMessage {
     pub channel_name: String,
     pub sender: String,
     pub message: String,
-    pub receivers: Vec<String>,
+    pub receivers: Vec<UserId>,
 }
 
 #[derive(Message)]
 #[rtype(result = "Vec<(String, String)>")]
 pub struct FetchUnseenMessages {
     pub channel_name: String,
-    pub username: String,
+    pub user_id: UserId,
     pub span: Span,
 }

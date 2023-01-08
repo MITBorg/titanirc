@@ -90,7 +90,7 @@ impl Handler<ChannelMessage> for Channel {
                 channel_name: self.name.to_string(),
                 sender: nick.to_string(),
                 message: msg.message.to_string(),
-                receivers: self.clients.values().map(|v| v.user.to_string()).collect(),
+                receivers: self.clients.values().map(|v| v.user_id).collect(),
             });
 
         for client in self.clients.keys() {
@@ -144,7 +144,7 @@ impl Handler<ChannelJoin> for Channel {
         self.persistence
             .do_send(crate::persistence::events::ChannelJoined {
                 channel_name: self.name.to_string(),
-                username: msg.connection.user.to_string(),
+                user_id: msg.connection.user_id,
                 span: msg.span.clone(),
             });
 
@@ -282,7 +282,7 @@ impl Handler<ChannelPart> for Channel {
         self.persistence
             .do_send(crate::persistence::events::ChannelParted {
                 channel_name: self.name.to_string(),
-                username: client_info.user.to_string(),
+                user_id: client_info.user_id,
                 span: msg.span.clone(),
             });
 

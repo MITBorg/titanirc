@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use actix::{
     Actor, ActorFutureExt, Addr, AsyncContext, Context, Handler, MessageResult, ResponseActFuture,
-    WrapFuture,
+    Supervised, WrapFuture,
 };
 use chrono::{DateTime, Utc};
 use futures::future::Either;
@@ -35,6 +35,8 @@ pub struct Channel {
 impl Actor for Channel {
     type Context = Context<Self>;
 }
+
+impl Supervised for Channel {}
 
 /// Broadcast a raw IRC message to all clients connected to this channel.
 impl Handler<Broadcast> for Channel {

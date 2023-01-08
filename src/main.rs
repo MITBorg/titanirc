@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use actix::{io::FramedWrite, Actor, Addr, AsyncContext};
+use actix::{io::FramedWrite, Actor, Addr, AsyncContext, Supervisor};
 use actix_rt::{Arbiter, System};
 use clap::Parser;
 use irc_proto::IrcCodec;
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
     let listen_address = opts.config.listen_address;
     let client_threads = opts.config.client_threads;
 
-    let server = Server::start_in_arbiter(&Arbiter::new().handle(), |_ctx| Server {
+    let server = Supervisor::start_in_arbiter(&Arbiter::new().handle(), |_ctx| Server {
         channels: HashMap::default(),
         clients: HashMap::default(),
         channel_arbiters: build_arbiters(opts.config.channel_threads),

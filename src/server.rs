@@ -2,7 +2,10 @@ pub mod response;
 
 use std::collections::HashMap;
 
-use actix::{Actor, Addr, AsyncContext, Context, Handler, MessageResult, ResponseFuture};
+use actix::{
+    Actor, Addr, AsyncContext, Context, Handler, MessageResult, ResponseFuture, Supervised,
+    Supervisor,
+};
 use actix_rt::Arbiter;
 use futures::{stream::FuturesOrdered, TryFutureExt};
 use irc_proto::{Command, Message, Prefix, Response};
@@ -31,6 +34,8 @@ pub struct Server {
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
     pub config: Config,
 }
+
+impl Supervised for Server {}
 
 /// Received when an admin SANICKs another user.
 impl Handler<UserNickChangeInternal> for Server {
@@ -148,7 +153,7 @@ impl Handler<ChannelJoin> for Server {
                 let channel_name = msg.channel_name.clone();
                 let server = ctx.address();
 
-                Channel::start_in_arbiter(&arbiter, move |_ctx| Channel {
+                Supervisor::start_in_arbiter(&arbiter, move |_ctx| Channel {
                     name: channel_name,
                     clients: HashMap::new(),
                     topic: None,

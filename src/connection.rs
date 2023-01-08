@@ -235,9 +235,9 @@ async fn start_authenticate_flow(
         };
 
         if authenticated {
-            write
-                .send(SaslSuccess(connection.nick.to_string()).into_message())
-                .await?;
+            for message in SaslSuccess(connection.clone()).into_messages() {
+                write.send(message).await?;
+            }
 
             return Ok(true);
         }
@@ -385,19 +385,37 @@ impl SaslStrategyUnsupported {
 }
 
 /// Returned to the client when authentication is successful.
-pub struct SaslSuccess(String);
+pub struct SaslSuccess(InitiatedConnection);
 
 impl SaslSuccess {
     #[must_use]
-    pub fn into_message(self) -> Message {
-        Message {
-            tags: None,
-            prefix: None,
-            command: Command::Response(
-                Response::RPL_SASLSUCCESS,
-                vec![self.0, "SASL authentication successful".to_string()],
-            ),
-        }
+    pub fn into_messages(self) -> [Message; 2] {
+        [
+            Message {
+                tags: None,
+                prefix: None,
+                command: Command::Response(
+                    Response::RPL_SASLSUCCESS,
+                    vec![
+                        self.0.nick.to_string(),
+                        "SASL authentication successful".to_string(),
+                    ],
+                ),
+            },
+            Message {
+                tags: None,
+                prefix: None,
+                command: Command::Response(
+                    Response::RPL_LOGGEDIN,
+                    vec![
+                        self.0.nick.to_string(),
+                        self.0.to_nick().to_string(),
+                        self.0.user.to_string(),
+                        format!("You are now logged in as {}", self.0.user),
+                    ],
+                ),
+            },
+        ]
     }
 }
 

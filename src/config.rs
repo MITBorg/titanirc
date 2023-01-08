@@ -17,6 +17,7 @@ pub struct Args {
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
     pub listen_address: SocketAddr,
+    pub database_uri: String,
     pub motd: Option<String>,
     /// Amount of threads to spawn for processing client commands, set to 0 to spawn clients on the
     /// main server thread.

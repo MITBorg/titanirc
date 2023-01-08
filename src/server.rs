@@ -34,6 +34,7 @@ pub struct Server {
     pub channels: HashMap<String, Addr<Channel>>,
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
     pub config: Config,
+    pub database: sqlx::Pool<sqlx::Any>,
 }
 
 impl Supervised for Server {}

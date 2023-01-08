@@ -6,7 +6,7 @@ use actix::{Actor, Addr, AsyncContext, Context, Handler, MessageResult, Response
 use futures::{stream::FuturesOrdered, TryFutureExt};
 use irc_proto::{Command, Message, Prefix, Response};
 use tokio_stream::StreamExt;
-use tracing::{instrument, Span};
+use tracing::{debug, instrument, warn, Span};
 
 use crate::{
     channel::Channel,
@@ -16,6 +16,7 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
         FetchClientByNick, ServerDisconnect, ServerFetchMotd, UserConnected, UserNickChange,
+        UserNickChangeInternal,
     },
     server::response::Motd,
     SERVER_NAME,
@@ -26,6 +27,23 @@ pub struct Server {
     pub channels: HashMap<String, Addr<Channel>>,
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
     pub config: Config,
+}
+
+/// Received when an admin SANICKs another user.
+impl Handler<UserNickChangeInternal> for Server {
+    type Result = ();
+
+    fn handle(&mut self, msg: UserNickChangeInternal, _ctx: &mut Self::Context) -> Self::Result {
+        let client = self.clients.iter().find(|(_k, v)| v.nick == msg.old_nick);
+        let Some((client, _)) = client else {
+            warn!(%msg.old_nick, %msg.new_nick, "User attempted to update nick for unknown user");
+            return;
+        };
+
+        debug!(%msg.old_nick, %msg.new_nick, "User is updating nick for another user");
+
+        client.do_send(msg);
+    }
 }
 
 /// Received when a user connects to the server, and sends them the server preamble

@@ -17,6 +17,7 @@ use crate::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelUpdateTopic, FetchClientDetails,
         ServerDisconnect, ServerFetchMotd, UserKickedFromChannel, UserNickChange,
+        UserNickChangeInternal,
     },
     server::Server,
     SERVER_NAME,
@@ -221,6 +222,34 @@ impl Handler<ListChannelMemberRequest> for Client {
     }
 }
 
+impl Handler<UserNickChangeInternal> for Client {
+    type Result = ();
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: UserNickChangeInternal, ctx: &mut Self::Context) -> Self::Result {
+        // alert the server to the nick change (we'll receive this event back so the user
+        // gets the notification too)
+        self.server.do_send(UserNickChange {
+            client: ctx.address(),
+            connection: self.connection.clone(),
+            new_nick: msg.new_nick.clone(),
+            span: Span::current(),
+        });
+
+        for channel in self.channels.values() {
+            channel.do_send(UserNickChange {
+                client: ctx.address(),
+                connection: self.connection.clone(),
+                new_nick: msg.new_nick.clone(),
+                span: Span::current(),
+            });
+        }
+
+        // updates our nick locally
+        self.connection.nick = msg.new_nick;
+    }
+}
+
 /// A message received from the root server to indicate that another known user has changed their
 /// nick
 impl Handler<UserNickChange> for Client {
@@ -280,26 +309,11 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                 // these were already handled by `negotiate_client_connection`
             }
             Command::NICK(new_nick) => {
-                // alert the server to the nick change (we'll receive this event back so the user
-                // gets the notification too)
-                self.server.do_send(UserNickChange {
-                    client: ctx.address(),
-                    connection: self.connection.clone(),
-                    new_nick: new_nick.clone(),
+                ctx.notify(UserNickChangeInternal {
+                    old_nick: self.connection.nick.to_string(),
+                    new_nick,
                     span: Span::current(),
                 });
-
-                for channel in self.channels.values() {
-                    channel.do_send(UserNickChange {
-                        client: ctx.address(),
-                        connection: self.connection.clone(),
-                        new_nick: new_nick.clone(),
-                        span: Span::current(),
-                    });
-                }
-
-                // updates our nick locally
-                self.connection.nick = new_nick;
             }
             Command::OPER(_, _) => {}
             Command::UserMODE(_, _) => {}
@@ -499,7 +513,13 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::ISON(_) => {}
             Command::SAJOIN(_, _) => {}
             Command::SAMODE(_, _, _) => {}
-            Command::SANICK(_, _) => {}
+            Command::SANICK(old_nick, new_nick) => {
+                self.server.do_send(UserNickChangeInternal {
+                    old_nick,
+                    new_nick,
+                    span: Span::current(),
+                });
+            }
             Command::SAPART(_, _) => {}
             Command::SAQUIT(_, _) => {}
             Command::NICKSERV(_) => {}

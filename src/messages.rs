@@ -23,6 +23,15 @@ pub struct ServerDisconnect {
     pub span: Span,
 }
 
+/// Internal event to update a user's nick.
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct UserNickChangeInternal {
+    pub old_nick: String,
+    pub new_nick: String,
+    pub span: Span,
+}
+
 /// Sent when the user changes their nick.
 #[derive(Message, Clone)]
 #[rtype(result = "()")]

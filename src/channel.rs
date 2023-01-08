@@ -3,8 +3,8 @@ pub mod response;
 use std::collections::HashMap;
 
 use actix::{
-    Actor, ActorFutureExt, Addr, AsyncContext, Context, Handler, MessageResult, ResponseActFuture,
-    Supervised, WrapFuture,
+    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, Handler, MessageResult,
+    ResponseActFuture, Supervised, WrapFuture,
 };
 use chrono::{DateTime, Utc};
 use futures::future::Either;
@@ -24,6 +24,9 @@ use crate::{
     server::Server,
 };
 
+#[derive(Copy, Clone)]
+pub struct ChannelId(pub i64);
+
 /// A channel is an IRC channel (ie. #abc) that multiple users can connect to in order
 /// to chat together.
 pub struct Channel {
@@ -32,16 +35,29 @@ pub struct Channel {
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
     pub topic: Option<CurrentChannelTopic>,
     pub persistence: Addr<Persistence>,
+    pub channel_id: ChannelId,
 }
 
 impl Actor for Channel {
     type Context = Context<Self>;
 
-    fn started(&mut self, _ctx: &mut Self::Context) {
-        self.persistence
-            .do_send(crate::persistence::events::ChannelCreated {
-                name: self.name.to_string(),
-            });
+    fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.wait(
+            self.persistence
+                .send(crate::persistence::events::ChannelCreated {
+                    name: self.name.to_string(),
+                })
+                .into_actor(self)
+                .map(|res, this, ctx| match res {
+                    Ok(channel_id) => {
+                        this.channel_id.0 = channel_id;
+                    }
+                    Err(error) => {
+                        error!(%error, "Failed to create channel in database");
+                        ctx.terminate();
+                    }
+                }),
+        );
     }
 }
 
@@ -87,7 +103,7 @@ impl Handler<ChannelMessage> for Channel {
 
         self.persistence
             .do_send(crate::persistence::events::ChannelMessage {
-                channel_name: self.name.to_string(),
+                channel_id: self.channel_id,
                 sender: nick.to_string(),
                 message: msg.message.to_string(),
                 receivers: self.clients.values().map(|v| v.user_id).collect(),
@@ -143,7 +159,7 @@ impl Handler<ChannelJoin> for Channel {
         // persist the user's join to the database
         self.persistence
             .do_send(crate::persistence::events::ChannelJoined {
-                channel_name: self.name.to_string(),
+                channel_id: self.channel_id,
                 user_id: msg.connection.user_id,
                 span: msg.span.clone(),
             });
@@ -281,7 +297,7 @@ impl Handler<ChannelPart> for Channel {
         // update the client's state in the database
         self.persistence
             .do_send(crate::persistence::events::ChannelParted {
-                channel_name: self.name.to_string(),
+                channel_id: self.channel_id,
                 user_id: client_info.user_id,
                 span: msg.span.clone(),
             });

@@ -22,17 +22,24 @@ impl actix::Actor for Persistence {
 
 /// Create a new channel in the database, if one doesn't already exist.
 impl Handler<ChannelCreated> for Persistence {
-    type Result = ResponseFuture<()>;
+    type Result = ResponseFuture<i64>;
 
     fn handle(&mut self, msg: ChannelCreated, _ctx: &mut Self::Context) -> Self::Result {
         let conn = self.database.clone();
 
         Box::pin(async move {
-            sqlx::query("INSERT OR IGNORE INTO channels (name) VALUES (?)")
-                .bind(msg.name)
-                .execute(&conn)
-                .await
-                .unwrap();
+            sqlx::query_as(
+                "INSERT OR IGNORE INTO channels
+                 (name) VALUES (?)
+                 ON CONFLICT(name)
+                   DO UPDATE SET name = name
+                 RETURNING id",
+            )
+            .bind(msg.name)
+            .fetch_one(&conn)
+            .await
+            .map(|(v,)| v)
+            .unwrap()
         })
     }
 }
@@ -48,10 +55,10 @@ impl Handler<ChannelJoined> for Persistence {
         Box::pin(async move {
             sqlx::query(
                 "INSERT INTO channel_users (channel, user, permissions, in_channel)
-                 VALUES ((SELECT id FROM channels WHERE name = ?), ?, ?, ?)
+                 VALUES (?, ?, ?, ?)
                  ON CONFLICT(channel, user) DO UPDATE SET in_channel = excluded.in_channel",
             )
-            .bind(msg.channel_name)
+            .bind(msg.channel_id.0)
             .bind(msg.user_id.0)
             .bind(0i32)
             .bind(true)
@@ -74,10 +81,10 @@ impl Handler<ChannelParted> for Persistence {
             sqlx::query(
                 "UPDATE channel_users
                  SET in_channel = false
-                 WHERE channel = (SELECT id FROM channels WHERE name = ?)
+                 WHERE channel = ?
                    AND user = ?",
             )
-            .bind(msg.channel_name)
+            .bind(msg.channel_id.0)
             .bind(msg.user_id.0)
             .execute(&conn)
             .await
@@ -98,7 +105,7 @@ impl Handler<FetchUserChannels> for Persistence {
                   FROM channel_users
                   INNER JOIN channels
                     ON channels.id = channel_users.channel
-                  WHERE user = (SELECT id FROM users WHERE username = ?)
+                  WHERE user = ?
                     AND in_channel = true",
             )
             .bind(msg.user_id.0)
@@ -119,18 +126,13 @@ impl Handler<ChannelMessage> for Persistence {
         let conn = self.database.clone();
 
         Box::pin(async move {
-            let (channel, idx): (i64, i64) = sqlx::query_as(
-                "WITH channel AS (SELECT id FROM channels WHERE name = ?)
-                 INSERT INTO channel_messages (channel, idx, sender, message)
-                     SELECT
-                        channel.id,
-                        COALESCE((SELECT MAX(idx) + 1 FROM channel_messages WHERE channel = channel.id), 0),
-                        ?,
-                        ?
-                    FROM channel
-                 RETURNING channel, idx",
+            let (idx,): (i64,) = sqlx::query_as(
+                "INSERT INTO channel_messages (channel, idx, sender, message)
+                     VALUES (?, COALESCE((SELECT MAX(idx) + 1 FROM channel_messages WHERE channel = ?), 0), ?, ?)
+                     RETURNING idx",
             )
-            .bind(msg.channel_name)
+            .bind(msg.channel_id.0)
+            .bind(msg.channel_id.0)
             .bind(msg.sender)
             .bind(msg.message)
             .fetch_one(&conn)
@@ -146,7 +148,7 @@ impl Handler<ChannelMessage> for Persistence {
                     msg.receivers.iter().map(|_| "?").join(",")
                 );
 
-                let mut query = sqlx::query(&query).bind(idx).bind(channel);
+                let mut query = sqlx::query(&query).bind(idx).bind(msg.channel_id.0);
                 for receiver in msg.receivers {
                     query = query.bind(receiver.0);
                 }

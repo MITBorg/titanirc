@@ -15,7 +15,7 @@ use tokio_stream::StreamExt;
 use tracing::{debug, instrument, warn, Span};
 
 use crate::{
-    channel::Channel,
+    channel::{Channel, ChannelId},
     client::Client,
     config::Config,
     connection::InitiatedConnection,
@@ -167,6 +167,7 @@ impl Handler<ChannelJoin> for Server {
                     topic: None,
                     server,
                     persistence,
+                    channel_id: ChannelId(0),
                 })
             })
             .clone();

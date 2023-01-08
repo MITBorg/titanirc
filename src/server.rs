@@ -1,12 +1,13 @@
 pub mod response;
 
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, MessageResult, ResponseFuture, Supervised,
     Supervisor,
 };
 use actix_rt::Arbiter;
+use clap::crate_version;
 use futures::{stream::FuturesOrdered, TryFutureExt};
 use irc_proto::{Command, Message, Prefix, Response};
 use rand::seq::SliceRandom;
@@ -60,37 +61,41 @@ impl Handler<UserConnected> for Server {
 
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: UserConnected, _ctx: &mut Self::Context) -> Self::Result {
+        let nick = msg.connection.to_nick();
+
         // send a welcome to the user
         let responses = [
             (
                 Response::RPL_WELCOME,
-                vec!["Welcome to the network jordan!jordan@proper.sick.kid"],
+                vec![Cow::Owned(format!("Welcome to the network {nick}",))],
             ),
-            (Response::RPL_YOURHOST, vec!["Your host is a sick kid"]),
+            (
+                Response::RPL_YOURHOST,
+                vec!["Your host is a sick kid".into()],
+            ),
             (
                 Response::RPL_CREATED,
-                vec!["This server was created at some point"],
+                vec!["This server was created at some point".into()],
             ),
             (
                 Response::RPL_MYINFO,
                 vec![
-                    SERVER_NAME,
-                    "0.0.1",
-                    "DOQRSZaghilopsuwz",
-                    "CFILMPQSbcefgijklmnopqrstuvz",
-                    "bkloveqjfI",
+                    SERVER_NAME.into(),
+                    crate_version!().into(),
+                    "DOQRSZaghilopsuwz".into(),
+                    "CFILMPQSbcefgijklmnopqrstuvz".into(),
+                    "bkloveqjfI".into(),
                 ],
             ),
             (
                 Response::RPL_ISUPPORT,
-                vec!["D", "are supported by this server"],
+                vec!["D".into(), "are supported by this server".into()],
             ),
         ];
 
         for (response, arguments) in responses {
-            // fixme: bad perf here with inserting at the front of a vec
             let arguments = std::iter::once(msg.connection.nick.clone())
-                .chain(arguments.into_iter().map(ToString::to_string))
+                .chain(arguments.into_iter().map(Cow::into_owned))
                 .collect();
 
             msg.handle.do_send(Broadcast {

@@ -85,6 +85,14 @@ impl Handler<ChannelMessage> for Channel {
         // build the nick prefix for the message we're about to broadcast
         let nick = sender.to_nick();
 
+        self.persistence
+            .do_send(crate::persistence::events::ChannelMessage {
+                channel_name: self.name.to_string(),
+                sender: nick.to_string(),
+                message: msg.message.to_string(),
+                receivers: self.clients.values().map(|v| v.user.to_string()).collect(),
+            });
+
         for client in self.clients.keys() {
             if client == &msg.client {
                 // don't echo the message back to the sender

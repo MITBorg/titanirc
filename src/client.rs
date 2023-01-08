@@ -19,7 +19,10 @@ use crate::{
         ServerDisconnect, ServerFetchMotd, UserKickedFromChannel, UserNickChange,
         UserNickChangeInternal,
     },
-    persistence::{events::FetchUserChannels, Persistence},
+    persistence::{
+        events::{FetchUnseenMessages, FetchUserChannels},
+        Persistence,
+    },
     server::Server,
     SERVER_NAME,
 };
@@ -168,21 +171,30 @@ impl Handler<JoinChannelRequest> for Client {
         // loop over all the channels and send a channel join notification to the root
         // server actor to get a handle back
         for channel_name in msg.channels {
-            if !channel_name.is_channel_name() {
+            if !channel_name.is_channel_name() || self.channels.contains_key(&channel_name) {
                 // todo: send message to client informing them of the invalid channel name
                 continue;
             }
 
+            let channel_handle_fut = self.server.clone().send(ChannelJoin {
+                channel_name: channel_name.to_string(),
+                client: ctx.address(),
+                connection: self.connection.clone(),
+                span: Span::current(),
+            });
+
+            let channel_messages_fut = self.persistence.send(FetchUnseenMessages {
+                channel_name: channel_name.to_string(),
+                username: self.connection.user.to_string(),
+                span: Span::current(),
+            });
+
             futures.push(
-                self.server
-                    .clone()
-                    .send(ChannelJoin {
-                        channel_name: channel_name.to_string(),
-                        client: ctx.address(),
-                        connection: self.connection.clone(),
-                        span: Span::current(),
-                    })
-                    .map(move |v| (channel_name, v.unwrap().unwrap())),
+                futures::future::join(channel_handle_fut, channel_messages_fut).map(
+                    move |(handle, messages)| {
+                        (channel_name, handle.unwrap().unwrap(), messages.unwrap())
+                    },
+                ),
             );
         }
 
@@ -191,9 +203,20 @@ impl Handler<JoinChannelRequest> for Client {
         let fut = wrap_future::<_, Self>(
             futures::future::join_all(futures.into_iter()).instrument(Span::current()),
         )
-        .map(|result, this, _ctx| {
-            for (channel_name, handle) in result {
+        .map(|result, this, ctx| {
+            for (channel_name, handle, messages) in result {
                 this.channels.insert(channel_name.clone(), handle);
+
+                for (source, message) in messages {
+                    ctx.notify(Broadcast {
+                        message: Message {
+                            tags: None,
+                            prefix: Some(Prefix::new_from_str(&source)),
+                            command: Command::PRIVMSG(channel_name.clone(), message),
+                        },
+                        span: this.span.clone(),
+                    });
+                }
             }
         });
 

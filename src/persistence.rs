@@ -1,9 +1,13 @@
 pub mod events;
 
 use actix::{Context, Handler, ResponseFuture};
+use itertools::Itertools;
 use tracing::instrument;
 
-use crate::persistence::events::{ChannelCreated, ChannelJoined, ChannelParted, FetchUserChannels};
+use crate::persistence::events::{
+    ChannelCreated, ChannelJoined, ChannelMessage, ChannelParted, FetchUnseenMessages,
+    FetchUserChannels,
+};
 
 /// Takes events destined for other actors and persists them to the database.
 pub struct Persistence {
@@ -104,6 +108,90 @@ impl Handler<FetchUserChannels> for Persistence {
             .into_iter()
             .map(|(v,)| v)
             .collect()
+        })
+    }
+}
+
+impl Handler<ChannelMessage> for Persistence {
+    type Result = ResponseFuture<()>;
+
+    fn handle(&mut self, msg: ChannelMessage, _ctx: &mut Self::Context) -> Self::Result {
+        let conn = self.database.clone();
+
+        Box::pin(async move {
+            let (channel, idx): (i64, i64) = sqlx::query_as(
+                "WITH channel AS (SELECT id FROM channels WHERE name = ?)
+                 INSERT INTO channel_messages (channel, idx, sender, message)
+                     SELECT
+                        channel.id,
+                        COALESCE((SELECT MAX(idx) + 1 FROM channel_messages WHERE channel = channel.id), 0),
+                        ?,
+                        ?
+                    FROM channel
+                 RETURNING channel, idx",
+            )
+            .bind(msg.channel_name)
+            .bind(msg.sender)
+            .bind(msg.message)
+            .fetch_one(&conn)
+            .await
+            .unwrap();
+
+            let query = format!(
+                "UPDATE channel_users
+                 SET last_seen_message_idx = ?
+                 WHERE channel = ?
+                   AND user IN (SELECT id FROM users WHERE username IN ({}))",
+                msg.receivers.iter().map(|_| "?").join(",")
+            );
+
+            let mut query = sqlx::query(&query).bind(idx).bind(channel);
+            for receiver in msg.receivers {
+                query = query.bind(receiver);
+            }
+
+            query.execute(&conn).await.unwrap();
+        })
+    }
+}
+
+impl Handler<FetchUnseenMessages> for Persistence {
+    type Result = ResponseFuture<Vec<(String, String)>>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: FetchUnseenMessages, _ctx: &mut Self::Context) -> Self::Result {
+        let conn = self.database.clone();
+
+        Box::pin(async move {
+            // select the last 500 messages, or the last message the user saw - whichever dataset
+            // is smaller.
+            let res = sqlx::query_as(
+                "WITH channel AS (SELECT id FROM channels WHERE name = ?)
+                 SELECT sender, message
+                 FROM channel_messages
+                 WHERE channel = (SELECT id FROM channel)
+                    AND idx > MAX(
+                        (
+                            SELECT MAX(0, MAX(idx) - 500)
+                            FROM channel_messages
+                            WHERE channel = (SELECT id FROM channel)
+                        ),
+                        (
+                            SELECT last_seen_message_idx
+                            FROM channel_users
+                            WHERE channel = (SELECT id FROM channel)
+                              AND user = (SELECT id FROM users WHERE username = ?)
+                        )
+                    )
+                 ORDER BY idx DESC",
+            )
+            .bind(msg.channel_name.to_string())
+            .bind(msg.username.to_string())
+            .fetch_all(&conn)
+            .await
+            .unwrap();
+
+            res
         })
     }
 }

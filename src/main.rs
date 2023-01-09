@@ -147,7 +147,7 @@ async fn start_tcp_acceptor_loop(
 
             // ensure we have all the details required to actually connect the client to the server
             // (ie. we have a nick, user, etc)
-            let Some(connection) = connection::negotiate_client_connection(&mut read, &mut write, database).await.unwrap() else {
+            let Some(connection) = connection::negotiate_client_connection(&mut read, &mut write, addr, database).await.unwrap() else {
                 error!("Failed to fully handshake with client, dropping connection");
                 return;
             };

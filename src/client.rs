@@ -66,7 +66,7 @@ impl Actor for Client {
         ctx.run_interval(Duration::from_secs(30), |this, ctx| {
             let _span = info_span!(parent: &this.span, "ping").entered();
 
-            if Instant::now().duration_since(this.last_active) > Duration::from_secs(120) {
+            if Instant::now().duration_since(this.last_active) >= Duration::from_secs(120) {
                 this.server_leave_reason = Some("Ping timeout: 120 seconds".to_string());
                 ctx.stop();
             }
@@ -78,6 +78,8 @@ impl Actor for Client {
             });
         });
 
+        // join the user to all the channels they were previously in before disconnecting from
+        // the server
         ctx.spawn(
             self.persistence
                 .send(FetchUserChannels {

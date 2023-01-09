@@ -1,5 +1,6 @@
 use std::{
     io::{Error, ErrorKind},
+    net::SocketAddr,
     str::FromStr,
 };
 
@@ -30,6 +31,7 @@ pub struct UserId(pub i64);
 
 #[derive(Default)]
 pub struct ConnectionRequest {
+    host: Option<SocketAddr>,
     nick: Option<String>,
     user: Option<String>,
     mode: Option<String>,
@@ -38,6 +40,7 @@ pub struct ConnectionRequest {
 
 #[derive(Clone)]
 pub struct InitiatedConnection {
+    pub host: SocketAddr,
     pub nick: String,
     pub user: String,
     pub mode: String,
@@ -51,7 +54,7 @@ impl InitiatedConnection {
         Prefix::Nickname(
             self.nick.to_string(),
             self.user.to_string(),
-            "my-host".to_string(),
+            self.host.ip().to_string(),
         )
     }
 }
@@ -61,6 +64,7 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
 
     fn try_from(value: ConnectionRequest) -> Result<Self, Self::Error> {
         let ConnectionRequest {
+            host: Some(host),
             nick: Some(nick),
             user: Some(user),
             mode: Some(mode),
@@ -70,6 +74,7 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
         };
 
         Ok(Self {
+            host,
             nick,
             user,
             mode,
@@ -85,9 +90,13 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
 pub async fn negotiate_client_connection(
     s: &mut MessageStream,
     write: &mut tokio_util::codec::FramedWrite<WriteHalf<TcpStream>, IrcCodec>,
+    host: SocketAddr,
     database: sqlx::Pool<sqlx::Any>,
 ) -> Result<Option<InitiatedConnection>, ProtocolError> {
-    let mut request = ConnectionRequest::default();
+    let mut request = ConnectionRequest {
+        host: Some(host),
+        ..ConnectionRequest::default()
+    };
 
     let mut capabilities_requested = false;
 

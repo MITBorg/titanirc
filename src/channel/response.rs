@@ -77,7 +77,7 @@ impl ChannelNamesList {
             nick_list: channel
                 .clients
                 .values()
-                .map(|v| v.nick.to_string())
+                .map(|(_, v)| v.nick.to_string())
                 .collect(),
         }
     }
@@ -161,4 +161,9 @@ impl ChannelInviteResult {
             command,
         })
     }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ChannelJoinRejectionReason {
+    Banned,
 }

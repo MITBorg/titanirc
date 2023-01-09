@@ -7,9 +7,12 @@ use chrono::Utc;
 use itertools::Itertools;
 use tracing::instrument;
 
-use crate::persistence::events::{
-    ChannelCreated, ChannelJoined, ChannelMessage, ChannelParted, FetchUnseenMessages,
-    FetchUserChannels,
+use crate::{
+    channel::permissions::Permission,
+    persistence::events::{
+        ChannelCreated, ChannelJoined, ChannelMessage, ChannelParted, FetchUnseenMessages,
+        FetchUserChannelPermissions, FetchUserChannels, SetUserChannelPermissions,
+    },
 };
 
 /// Takes events destined for other actors and persists them to the database.
@@ -116,6 +119,56 @@ impl Handler<ChannelParted> for Persistence {
             )
             .bind(msg.channel_id.0)
             .bind(msg.user_id.0)
+            .execute(&conn)
+            .await
+            .unwrap();
+        })
+    }
+}
+
+impl Handler<FetchUserChannelPermissions> for Persistence {
+    type Result = ResponseFuture<Option<Permission>>;
+
+    fn handle(
+        &mut self,
+        msg: FetchUserChannelPermissions,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        let conn = self.database.clone();
+
+        Box::pin(async move {
+            sqlx::query_as(
+                "SELECT permissions
+                 FROM channel_users
+                 WHERE user = ?
+                   AND channel = ?",
+            )
+            .bind(msg.user_id.0)
+            .bind(msg.channel_id.0)
+            .fetch_optional(&conn)
+            .await
+            .unwrap()
+            .map(|(v,)| v)
+        })
+    }
+}
+
+impl Handler<SetUserChannelPermissions> for Persistence {
+    type Result = ResponseFuture<()>;
+
+    fn handle(&mut self, msg: SetUserChannelPermissions, _ctx: &mut Self::Context) -> Self::Result {
+        let conn = self.database.clone();
+
+        Box::pin(async move {
+            sqlx::query(
+                "UPDATE channel_users
+                 SET permissions = ?
+                 WHERE user = ?
+                   AND channel = ?",
+            )
+            .bind(msg.permissions)
+            .bind(msg.user_id.0)
+            .bind(msg.channel_id.0)
             .execute(&conn)
             .await
             .unwrap();

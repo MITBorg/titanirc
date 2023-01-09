@@ -1,7 +1,10 @@
 use actix::Message;
 use tracing::Span;
 
-use crate::{channel::ChannelId, connection::UserId};
+use crate::{
+    channel::{permissions::Permission, ChannelId},
+    connection::UserId,
+};
 
 #[derive(Message)]
 #[rtype(result = "i64")]
@@ -30,6 +33,21 @@ pub struct ChannelParted {
 pub struct FetchUserChannels {
     pub user_id: UserId,
     pub span: Span,
+}
+
+#[derive(Message)]
+#[rtype(result = "Option<Permission>")]
+pub struct FetchUserChannelPermissions {
+    pub channel_id: ChannelId,
+    pub user_id: UserId,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SetUserChannelPermissions {
+    pub channel_id: ChannelId,
+    pub user_id: UserId,
+    pub permissions: Permission,
 }
 
 #[derive(Message)]

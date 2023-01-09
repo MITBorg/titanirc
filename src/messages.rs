@@ -51,7 +51,9 @@ pub struct ChannelList {
 
 /// Sent when the user attempts to join a channel.
 #[derive(Message)]
-#[rtype(result = "Result<Addr<Channel>>")]
+#[rtype(
+    result = "Result<std::result::Result<Addr<Channel>, super::channel::response::ChannelJoinRejectionReason>>"
+)]
 pub struct ChannelJoin {
     pub channel_name: String,
     pub client: Addr<Client>,

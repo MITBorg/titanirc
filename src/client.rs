@@ -207,6 +207,14 @@ impl Handler<JoinChannelRequest> for Client {
         )
         .map(|result, this, _ctx| {
             for (channel_name, handle, messages) in result {
+                let handle = match handle {
+                    Ok(v) => v,
+                    Err(error) => {
+                        error!(?error, "Failed to join user to channel");
+                        continue;
+                    }
+                };
+
                 this.channels.insert(channel_name.clone(), handle);
 
                 for (source, message) in messages {

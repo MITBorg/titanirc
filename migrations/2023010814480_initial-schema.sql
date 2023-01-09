@@ -15,11 +15,11 @@ CREATE UNIQUE INDEX channel_name ON channels(name);
 
 CREATE TABLE channel_messages (
       channel INT NOT NULL,
-      idx INT NOT NULL,
+      timestamp INT NOT NULL,
       sender VARCHAR(255),
       message VARCHAR(255),
       FOREIGN KEY(channel) REFERENCES channels(id),
-      PRIMARY KEY(channel, idx)
+      PRIMARY KEY(channel, timestamp)
 );
 
 CREATE TABLE channel_users (
@@ -27,10 +27,9 @@ CREATE TABLE channel_users (
     user INT NOT NULL,
     permissions INT NOT NULL DEFAULT 0,
     in_channel BOOLEAN DEFAULT false,
-    last_seen_message_idx INT,
+    last_seen_message_timestamp INT,
     FOREIGN KEY(user) REFERENCES users(id),
-    FOREIGN KEY(channel) REFERENCES channels(id)
-    -- FOREIGN KEY(channel, last_seen_message_idx) REFERENCES channels(channel, idx)
+    FOREIGN KEY(channel) REFERENCES channels(id),
+    -- FOREIGN KEY(channel, last_seen_message_timestamp) REFERENCES channel_messages(channel, timestamp)
+    PRIMARY KEY(channel, user)
 );
-
-CREATE UNIQUE INDEX channel_user ON channel_users(channel, user);

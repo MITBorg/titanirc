@@ -81,9 +81,12 @@ async fn main() -> anyhow::Result<()> {
 
     let persistence_addr = {
         let database = database.clone();
+        let config = opts.config.clone();
 
         Supervisor::start_in_arbiter(&server_arbiter.handle(), move |_ctx| Persistence {
             database,
+            max_message_replay_since: config.max_message_replay_since,
+            last_seen_clock: 0,
         })
     };
 

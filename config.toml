@@ -1,6 +1,8 @@
 listen-address = "[::]:6667"
 database-uri = "sqlite://titanircd.db"
 
+max-message-replay-since = "1d"
+
 client-threads = 1
 channel-threads = 1
 

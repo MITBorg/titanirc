@@ -1,11 +1,30 @@
+use anyhow::anyhow;
+use irc_proto::ChannelMode;
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, sqlx::Type)]
 #[repr(i16)]
 pub enum Permission {
     Ban = -1,
     Normal = 0,
     Voice = 1,
-    HalfOperator = 2,
-    Operator = i16::MAX,
+    HalfOperator = i16::MAX - 2,
+    Operator = i16::MAX - 1,
+    Founder = i16::MAX,
+}
+
+impl TryFrom<ChannelMode> for Permission {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ChannelMode) -> Result<Self, Self::Error> {
+        match value {
+            ChannelMode::Ban => Ok(Self::Ban),
+            ChannelMode::Voice => Ok(Self::Voice),
+            ChannelMode::Halfop => Ok(Self::HalfOperator),
+            ChannelMode::Oper => Ok(Self::Operator),
+            ChannelMode::Founder => Ok(Self::Founder),
+            _ => Err(anyhow!("unknown user access level: {value:?}")),
+        }
+    }
 }
 
 impl Permission {
@@ -31,5 +50,14 @@ impl Permission {
     #[must_use]
     pub fn can_kick(self) -> bool {
         self == Self::Operator
+    }
+
+    /// Returns true, if the user is allowed to set the given permission on another
+    /// user.
+    #[must_use]
+    pub const fn can_set_permission(self, new: Self, old: Self) -> bool {
+        (self as i16) >= (Self::HalfOperator as i16)
+            && (self as i16) > (new as i16)
+            && (self as i16) > (old as i16)
     }
 }

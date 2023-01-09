@@ -1,5 +1,6 @@
 use actix::{Addr, Message};
 use anyhow::Result;
+use irc_proto::{ChannelMode, Mode};
 use tracing::Span;
 
 use crate::{channel::Channel, client::Client, connection::InitiatedConnection};
@@ -82,6 +83,15 @@ pub struct ChannelMemberList {
 #[rtype(result = "super::channel::response::ChannelTopic")]
 pub struct ChannelFetchTopic {
     pub span: Span,
+}
+
+/// Sets the given modes on a channel.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ChannelSetMode {
+    pub span: Span,
+    pub client: Addr<Client>,
+    pub modes: Vec<Mode<ChannelMode>>,
 }
 
 /// Attempts to kick a user from a channel.

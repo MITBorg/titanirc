@@ -15,9 +15,9 @@ use crate::{
     connection::{InitiatedConnection, MessageSink, SaslAlreadyAuthenticated},
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
-        ChannelMemberList, ChannelMessage, ChannelPart, ChannelUpdateTopic, FetchClientDetails,
-        ServerDisconnect, ServerFetchMotd, UserKickedFromChannel, UserNickChange,
-        UserNickChangeInternal,
+        ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
+        FetchClientDetails, ServerDisconnect, ServerFetchMotd, UserKickedFromChannel,
+        UserNickChange, UserNickChangeInternal,
     },
     persistence::{
         events::{FetchUnseenMessages, FetchUserChannels},
@@ -397,7 +397,17 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     span: Span::current(),
                 });
             }
-            Command::ChannelMODE(_, _) => {}
+            Command::ChannelMODE(channel, modes) => {
+                let Some(channel) = self.channels.get(&channel) else {
+                    return;
+                };
+
+                channel.do_send(ChannelSetMode {
+                    span: Span::current(),
+                    client: ctx.address(),
+                    modes,
+                });
+            }
             Command::TOPIC(channel, topic) => {
                 let Some(channel) = self.channels.get(&channel) else {
                     return;

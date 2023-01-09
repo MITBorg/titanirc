@@ -9,8 +9,8 @@ use actix::{
 };
 use chrono::{DateTime, Utc};
 use futures::future::Either;
-use irc_proto::{Command, Message};
-use tracing::{debug, error, info, instrument, Span};
+use irc_proto::{Command, Message, Mode};
+use tracing::{debug, error, info, instrument, warn, Span};
 
 use crate::{
     channel::{
@@ -23,10 +23,13 @@ use crate::{
     connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser,
-        ChannelMemberList, ChannelMessage, ChannelPart, ChannelUpdateTopic, FetchClientByNick,
-        ServerDisconnect, UserKickedFromChannel, UserNickChange,
+        ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
+        FetchClientByNick, ServerDisconnect, UserKickedFromChannel, UserNickChange,
     },
-    persistence::{events::FetchUserChannelPermissions, Persistence},
+    persistence::{
+        events::{FetchUserChannelPermissions, SetUserChannelPermissions},
+        Persistence,
+    },
     server::Server,
 };
 
@@ -136,6 +139,81 @@ impl Handler<ChannelMessage> for Channel {
                     command: Command::PRIVMSG(self.name.to_string(), msg.message.clone()),
                 },
             });
+        }
+    }
+}
+
+impl Handler<ChannelSetMode> for Channel {
+    type Result = ();
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ChannelSetMode, ctx: &mut Self::Context) -> Self::Result {
+        let Some((permissions, client)) = self.clients.get(&msg.client).cloned() else {
+            return;
+        };
+
+        for mode in msg.modes {
+            // TODO
+            let (add, channel_mode, arg) = match mode.clone() {
+                Mode::Plus(mode, arg) => (true, mode, arg),
+                Mode::Minus(mode, arg) => (false, mode, arg),
+            };
+
+            if let Ok(user_mode) = Permission::try_from(channel_mode) {
+                let Some(affected_nick) = arg else {
+                    error!("No user given");
+                    continue;
+                };
+
+                // TODO: this should allow setting perms not currently in the channel, this probably
+                //  ties into fetching all user permissions on boot of the channel
+                let Some((_, (affected_user_perms, affected_user))) =
+                    self.clients.iter_mut().find(|(_, (_, connection))| {
+                        connection.nick == affected_nick
+                    }) else {
+                        error!("Unknown user to set perms on");
+                        continue;
+                    };
+
+                let new_affected_user_perms = if add {
+                    user_mode
+                } else if *affected_user_perms == user_mode {
+                    Permission::Normal
+                } else {
+                    error!("Removing the given permission would do nothing");
+                    continue;
+                };
+
+                if !permissions.can_set_permission(new_affected_user_perms, *affected_user_perms) {
+                    error!(
+                        ?permissions,
+                        ?new_affected_user_perms,
+                        ?affected_user_perms,
+                        "User is not allowed to set permissions for this user"
+                    );
+
+                    continue;
+                }
+
+                self.persistence.do_send(SetUserChannelPermissions {
+                    channel_id: self.channel_id,
+                    user_id: affected_user.user_id,
+                    permissions: new_affected_user_perms,
+                });
+
+                *affected_user_perms = new_affected_user_perms;
+
+                ctx.notify(Broadcast {
+                    message: Message {
+                        tags: None,
+                        prefix: Some(client.to_nick()),
+                        command: Command::ChannelMODE(self.name.to_string(), vec![mode]),
+                    },
+                    span: Span::current(),
+                });
+            } else {
+                // TODO
+            }
         }
     }
 }

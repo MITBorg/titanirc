@@ -16,8 +16,8 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
-        FetchClientDetails, ServerDisconnect, ServerFetchMotd, UserKickedFromChannel,
-        UserNickChange, UserNickChangeInternal,
+        FetchClientDetails, PeerToPeerMessage, ServerDisconnect, ServerFetchMotd,
+        UserKickedFromChannel, UserNickChange, UserNickChangeInternal,
     },
     persistence::{
         events::{FetchUnseenMessages, FetchUserChannels, ReserveNick},
@@ -511,7 +511,12 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::PRIVMSG(target, message) => {
                 if !target.is_channel_name() {
                     // private message to another user
-                    error!("Private messages not implemented");
+                    self.server.do_send(PeerToPeerMessage {
+                        destination: target,
+                        message,
+                        from: ctx.address(),
+                        span: Span::current(),
+                    });
                 } else if let Some(channel) = self.channels.get(&target) {
                     channel.do_send(ChannelMessage {
                         client: ctx.address(),
@@ -586,6 +591,7 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::SAJOIN(_, _) => {}
             Command::SAMODE(_, _, _) => {}
             Command::SANICK(old_nick, new_nick) => {
+                // TODO: permission checks
                 self.server.do_send(UserNickChangeInternal {
                     old_nick,
                     new_nick,

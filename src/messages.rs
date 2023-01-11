@@ -168,3 +168,13 @@ pub struct ChannelInvite {
 pub struct FetchClientByNick {
     pub nick: String,
 }
+
+/// Sends a private message between two users.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PeerToPeerMessage {
+    pub destination: String,
+    pub message: String,
+    pub from: Addr<Client>,
+    pub span: Span,
+}

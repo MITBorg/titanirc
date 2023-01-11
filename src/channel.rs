@@ -116,6 +116,7 @@ impl Handler<ChannelMessage> for Channel {
         // build the nick prefix for the message we're about to broadcast
         let nick = sender.to_nick();
 
+        // TODO: implement client msg recv acks
         self.persistence
             .do_send(crate::persistence::events::ChannelMessage {
                 channel_id: self.channel_id,

@@ -21,8 +21,8 @@ use crate::{
     connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
-        FetchClientByNick, ServerDisconnect, ServerFetchMotd, UserConnected, UserNickChange,
-        UserNickChangeInternal,
+        FetchClientByNick, PeerToPeerMessage, ServerDisconnect, ServerFetchMotd, UserConnected,
+        UserNickChange, UserNickChangeInternal,
     },
     persistence::Persistence,
     server::response::Motd,
@@ -250,6 +250,38 @@ impl Handler<ChannelList> for Server {
             });
 
         Box::pin(fut)
+    }
+}
+
+// TODO: implement offline messaging and replay
+impl Handler<PeerToPeerMessage> for Server {
+    type Result = ();
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: PeerToPeerMessage, _ctx: &mut Self::Context) -> Self::Result {
+        let Some(source) = self.clients.get(&msg.from) else {
+            // user is not yet registered with the server
+            return;
+        };
+
+        // TODO: O(1) lookup of users by nick
+        let target = self
+            .clients
+            .iter()
+            .find(|(_handle, connection)| connection.nick == msg.destination);
+        let Some((target, _)) = target else {
+            // return error to caller that user does not exist
+            return;
+        };
+
+        target.do_send(Broadcast {
+            message: Message {
+                tags: None,
+                prefix: Some(source.to_nick()),
+                command: Command::PRIVMSG(msg.destination, msg.message),
+            },
+            span: msg.span,
+        });
     }
 }
 

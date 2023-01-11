@@ -1,6 +1,8 @@
 use argon2::{password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use rand::rngs::OsRng;
 
+use crate::connection::UserId;
+
 /// Attempts creation of a new user, returning the password of the user.
 ///
 /// The returned password _is not_ guaranteed to be the password that was just set.
@@ -24,6 +26,25 @@ pub async fn create_user_or_fetch_password_hash(
     .bind(password_hash)
     .fetch_one(conn)
     .await
+}
+
+pub async fn reserve_nick(
+    conn: &sqlx::Pool<sqlx::Any>,
+    nick: &str,
+    user_id: UserId,
+) -> Result<bool, sqlx::Error> {
+    let (owning_user,): (i64,) = sqlx::query_as(
+        "INSERT INTO user_nicks (nick, user)
+         VALUES (?, ?)
+         ON CONFLICT(nick) DO UPDATE SET nick = nick
+         RETURNING user",
+    )
+    .bind(nick)
+    .bind(user_id.0)
+    .fetch_one(conn)
+    .await?;
+
+    Ok(owning_user == user_id.0)
 }
 
 /// Compares a password to a hash stored in the database.

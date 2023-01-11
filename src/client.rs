@@ -20,7 +20,7 @@ use crate::{
         UserNickChange, UserNickChangeInternal,
     },
     persistence::{
-        events::{FetchUnseenMessages, FetchUserChannels},
+        events::{FetchUnseenMessages, FetchUserChannels, ReserveNick},
         Persistence,
     },
     server::Server,
@@ -271,30 +271,44 @@ impl Handler<ListChannelMemberRequest> for Client {
 }
 
 impl Handler<UserNickChangeInternal> for Client {
-    type Result = ();
+    type Result = ResponseActFuture<Self, ()>;
 
     #[instrument(parent = &msg.span, skip_all)]
-    fn handle(&mut self, msg: UserNickChangeInternal, ctx: &mut Self::Context) -> Self::Result {
-        // alert the server to the nick change (we'll receive this event back so the user
-        // gets the notification too)
-        self.server.do_send(UserNickChange {
-            client: ctx.address(),
-            connection: self.connection.clone(),
-            new_nick: msg.new_nick.clone(),
-            span: Span::current(),
-        });
+    fn handle(&mut self, msg: UserNickChangeInternal, _ctx: &mut Self::Context) -> Self::Result {
+        self.persistence
+            .send(ReserveNick {
+                user_id: self.connection.user_id,
+                nick: msg.new_nick.clone(),
+            })
+            .into_actor(self)
+            .map(|res, this, ctx| {
+                if !res.unwrap() {
+                    // TODO: send notification to user to say the nick isn't available
+                    return;
+                }
 
-        for channel in self.channels.values() {
-            channel.do_send(UserNickChange {
-                client: ctx.address(),
-                connection: self.connection.clone(),
-                new_nick: msg.new_nick.clone(),
-                span: Span::current(),
-            });
-        }
+                // alert the server to the nick change (we'll receive this event back so the user
+                // gets the notification too)
+                this.server.do_send(UserNickChange {
+                    client: ctx.address(),
+                    connection: this.connection.clone(),
+                    new_nick: msg.new_nick.clone(),
+                    span: Span::current(),
+                });
 
-        // updates our nick locally
-        self.connection.nick = msg.new_nick;
+                for channel in this.channels.values() {
+                    channel.do_send(UserNickChange {
+                        client: ctx.address(),
+                        connection: this.connection.clone(),
+                        new_nick: msg.new_nick.clone(),
+                        span: Span::current(),
+                    });
+                }
+
+                // updates our nick locally
+                this.connection.nick = msg.new_nick;
+            })
+            .boxed_local()
     }
 }
 

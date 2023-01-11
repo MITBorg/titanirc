@@ -6,6 +6,12 @@ CREATE TABLE users (
 
 CREATE UNIQUE INDEX users_username ON users(username);
 
+CREATE TABLE user_nicks (
+    nick VARCHAR(255) NOT NULL PRIMARY KEY,
+    user INTEGER NOT NULL,
+    FOREIGN KEY(user) REFERENCES users(id)
+);
+
 CREATE TABLE channels (
     id INTEGER PRIMARY KEY,
     name VARCHAR(255) NOT NULL

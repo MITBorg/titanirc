@@ -66,3 +66,10 @@ pub struct FetchUnseenMessages {
     pub user_id: UserId,
     pub span: Span,
 }
+
+#[derive(Message)]
+#[rtype(result = "bool")]
+pub struct ReserveNick {
+    pub user_id: UserId,
+    pub nick: String,
+}

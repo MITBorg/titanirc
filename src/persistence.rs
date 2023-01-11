@@ -11,7 +11,7 @@ use crate::{
     channel::permissions::Permission,
     persistence::events::{
         ChannelCreated, ChannelJoined, ChannelMessage, ChannelParted, FetchUnseenMessages,
-        FetchUserChannelPermissions, FetchUserChannels, SetUserChannelPermissions,
+        FetchUserChannelPermissions, FetchUserChannels, ReserveNick, SetUserChannelPermissions,
     },
 };
 
@@ -277,6 +277,30 @@ impl Handler<FetchUnseenMessages> for Persistence {
             .unwrap();
 
             res
+        })
+    }
+}
+
+impl Handler<ReserveNick> for Persistence {
+    type Result = ResponseFuture<bool>;
+
+    fn handle(&mut self, msg: ReserveNick, _ctx: &mut Self::Context) -> Self::Result {
+        let database = self.database.clone();
+
+        Box::pin(async move {
+            let (owning_user,): (i64,) = sqlx::query_as(
+                "INSERT INTO user_nicks (nick, user)
+                 VALUES (?, ?)
+                 ON CONFLICT(nick) DO UPDATE SET nick = nick
+                 RETURNING user",
+            )
+            .bind(msg.nick)
+            .bind(msg.user_id.0)
+            .fetch_one(&database)
+            .await
+            .unwrap();
+
+            owning_user == msg.user_id.0
         })
     }
 }

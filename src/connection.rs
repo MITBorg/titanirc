@@ -4,7 +4,7 @@ use std::{
     str::FromStr,
 };
 
-use actix::io::FramedWrite;
+use actix::{io::FramedWrite, Addr};
 use argon2::PasswordHash;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use const_format::concatcp;
@@ -19,7 +19,10 @@ use tokio::{
 use tokio_util::codec::FramedRead;
 use tracing::{instrument, warn};
 
-use crate::database::verify_password;
+use crate::{
+    database::verify_password,
+    persistence::{events::ReserveNick, Persistence},
+};
 
 pub type MessageStream = FramedRead<ReadHalf<TcpStream>, irc_proto::IrcCodec>;
 pub type MessageSink = FramedWrite<Message, WriteHalf<TcpStream>, irc_proto::IrcCodec>;
@@ -91,6 +94,7 @@ pub async fn negotiate_client_connection(
     s: &mut MessageStream,
     write: &mut tokio_util::codec::FramedWrite<WriteHalf<TcpStream>, IrcCodec>,
     host: SocketAddr,
+    persistence: &Addr<Persistence>,
     database: sqlx::Pool<sqlx::Any>,
 ) -> Result<Option<InitiatedConnection>, ProtocolError> {
     let mut request = ConnectionRequest {
@@ -189,6 +193,21 @@ pub async fn negotiate_client_connection(
 
     if let Some(user_id) = user_id {
         initiated.user_id.0 = user_id;
+
+        let reserved_nick = persistence
+            .send(ReserveNick {
+                user_id: initiated.user_id,
+                nick: initiated.nick.clone(),
+            })
+            .await
+            .map_err(|e| ProtocolError::Io(Error::new(ErrorKind::InvalidData, e)))?;
+
+        if !reserved_nick {
+            return Err(ProtocolError::Io(Error::new(
+                ErrorKind::InvalidData,
+                "nick is already in use by another user",
+            )));
+        }
 
         Ok(Some(initiated))
     } else {

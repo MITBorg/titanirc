@@ -15,7 +15,7 @@ use tokio_stream::StreamExt;
 use tracing::{debug, instrument, warn, Span};
 
 use crate::{
-    channel::{Channel, ChannelId},
+    channel::{permissions::Permission, Channel, ChannelId},
     client::Client,
     config::Config,
     connection::InitiatedConnection,
@@ -91,7 +91,10 @@ impl Handler<UserConnected> for Server {
             ),
             (
                 Response::RPL_ISUPPORT,
-                vec!["D".into(), "are supported by this server".into()],
+                vec![
+                    format!("PREFIX={}", Permission::SUPPORTED_PREFIXES).into(),
+                    "are supported by this server".into(),
+                ],
             ),
         ];
 
@@ -163,6 +166,7 @@ impl Handler<ChannelJoin> for Server {
 
                 Supervisor::start_in_arbiter(&arbiter, move |_ctx| Channel {
                     name: channel_name,
+                    permissions: HashMap::new(),
                     clients: HashMap::new(),
                     topic: None,
                     server,

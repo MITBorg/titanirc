@@ -30,7 +30,8 @@ pub type MessageSink = FramedWrite<Message, WriteHalf<TcpStream>, irc_proto::Irc
 
 pub const SUPPORTED_CAPABILITIES: &[&str] = &[concatcp!("sasl=", AuthStrategy::SUPPORTED)];
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, sqlx::Type)]
+#[sqlx(transparent)]
 pub struct UserId(pub i64);
 
 #[derive(Default)]

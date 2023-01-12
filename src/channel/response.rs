@@ -77,7 +77,13 @@ impl ChannelNamesList {
             nick_list: channel
                 .clients
                 .values()
-                .map(|(_, v)| v.nick.to_string())
+                .map(|v| {
+                    format!(
+                        "{}{}",
+                        channel.get_user_permissions(v.user_id).into_prefix(),
+                        v.nick
+                    )
+                })
                 .collect(),
         }
     }

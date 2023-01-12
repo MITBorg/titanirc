@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use actix::Message;
 use tracing::Span;
 
@@ -36,10 +38,9 @@ pub struct FetchUserChannels {
 }
 
 #[derive(Message)]
-#[rtype(result = "Option<Permission>")]
-pub struct FetchUserChannelPermissions {
+#[rtype(result = "HashMap<UserId, Permission>")]
+pub struct FetchAllUserChannelPermissions {
     pub channel_id: ChannelId,
-    pub user_id: UserId,
 }
 
 #[derive(Message)]

@@ -1,6 +1,6 @@
 pub mod events;
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use actix::{AsyncContext, Context, Handler, ResponseFuture, WrapFuture};
 use chrono::Utc;
@@ -9,9 +9,11 @@ use tracing::instrument;
 
 use crate::{
     channel::permissions::Permission,
+    connection::UserId,
     persistence::events::{
-        ChannelCreated, ChannelJoined, ChannelMessage, ChannelParted, FetchUnseenMessages,
-        FetchUserChannelPermissions, FetchUserChannels, ReserveNick, SetUserChannelPermissions,
+        ChannelCreated, ChannelJoined, ChannelMessage, ChannelParted,
+        FetchAllUserChannelPermissions, FetchUnseenMessages, FetchUserChannels, ReserveNick,
+        SetUserChannelPermissions,
     },
 };
 
@@ -126,29 +128,28 @@ impl Handler<ChannelParted> for Persistence {
     }
 }
 
-impl Handler<FetchUserChannelPermissions> for Persistence {
-    type Result = ResponseFuture<Option<Permission>>;
+impl Handler<FetchAllUserChannelPermissions> for Persistence {
+    type Result = ResponseFuture<HashMap<UserId, Permission>>;
 
     fn handle(
         &mut self,
-        msg: FetchUserChannelPermissions,
+        msg: FetchAllUserChannelPermissions,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         let conn = self.database.clone();
 
         Box::pin(async move {
-            sqlx::query_as(
-                "SELECT permissions
+            sqlx::query_as::<_, (UserId, Permission)>(
+                "SELECT user, permissions
                  FROM channel_users
-                 WHERE user = ?
-                   AND channel = ?",
+                 WHERE channel = ?",
             )
-            .bind(msg.user_id.0)
             .bind(msg.channel_id.0)
-            .fetch_optional(&conn)
+            .fetch_all(&conn)
             .await
             .unwrap()
-            .map(|(v,)| v)
+            .into_iter()
+            .collect()
         })
     }
 }

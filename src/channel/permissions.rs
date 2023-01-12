@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use irc_proto::ChannelMode;
+use irc_proto::{ChannelMode, Mode};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, sqlx::Type)]
 #[repr(i16)]
@@ -23,6 +23,48 @@ impl TryFrom<ChannelMode> for Permission {
             ChannelMode::Oper => Ok(Self::Operator),
             ChannelMode::Founder => Ok(Self::Founder),
             _ => Err(anyhow!("unknown user access level: {value:?}")),
+        }
+    }
+}
+
+impl Permission {
+    /// A list of (mode)prefix used to inform clients of which modes set which prefixes.
+    pub const SUPPORTED_PREFIXES: &'static str = "(qohv)~@%+";
+
+    /// Builds the mode message that's used to set (or unset) this permission.
+    #[must_use]
+    pub fn into_mode(self, add: bool, nick: String) -> Option<Mode<ChannelMode>> {
+        <Option<ChannelMode>>::from(self).map(|v| {
+            if add {
+                Mode::Plus(v, Some(nick))
+            } else {
+                Mode::Minus(v, Some(nick))
+            }
+        })
+    }
+
+    /// Grabs the prefix that is used to represent a permission.
+    #[must_use]
+    pub const fn into_prefix(self) -> &'static str {
+        match self {
+            Self::Ban | Self::Normal => "",
+            Self::Voice => "+",
+            Self::HalfOperator => "%",
+            Self::Operator => "@",
+            Self::Founder => "~",
+        }
+    }
+}
+
+impl From<Permission> for Option<ChannelMode> {
+    fn from(value: Permission) -> Self {
+        match value {
+            Permission::Ban => Some(ChannelMode::Ban),
+            Permission::Normal => None,
+            Permission::Voice => Some(ChannelMode::Voice),
+            Permission::HalfOperator => Some(ChannelMode::Halfop),
+            Permission::Operator => Some(ChannelMode::Oper),
+            Permission::Founder => Some(ChannelMode::Founder),
         }
     }
 }

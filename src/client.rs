@@ -574,7 +574,13 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::WHOIS(_, _) => {}
             Command::WHOWAS(_, _, _) => {}
             Command::KILL(_, _) => {}
-            Command::PING(_, _) => {}
+            Command::PING(v, _) => {
+                self.writer.write(Message {
+                    tags: None,
+                    prefix: None,
+                    command: Command::PONG(v, None),
+                });
+            }
             Command::PONG(_, _) => {
                 self.last_active = Instant::now();
             }

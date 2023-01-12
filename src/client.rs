@@ -12,7 +12,7 @@ use tracing::{debug, error, info_span, instrument, warn, Instrument, Span};
 
 use crate::{
     channel::Channel,
-    connection::{InitiatedConnection, MessageSink, SaslAlreadyAuthenticated},
+    connection::{sasl::SaslAlreadyAuthenticated, InitiatedConnection, MessageSink},
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,

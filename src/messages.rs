@@ -3,7 +3,11 @@ use anyhow::Result;
 use irc_proto::{ChannelMode, Mode};
 use tracing::Span;
 
-use crate::{channel::Channel, client::Client, connection::InitiatedConnection};
+use crate::{
+    channel::Channel,
+    client::Client,
+    connection::{InitiatedConnection, UserId},
+};
 
 /// Sent when a user is connecting to the server.
 #[derive(Message, Clone)]
@@ -172,8 +176,8 @@ pub struct FetchClientByNick {
 /// Sends a private message between two users.
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct PeerToPeerMessage {
-    pub destination: String,
+pub struct PrivateMessage {
+    pub destination: UserId,
     pub message: String,
     pub from: Addr<Client>,
     pub span: Span,

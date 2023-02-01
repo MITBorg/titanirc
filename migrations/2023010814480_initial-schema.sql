@@ -39,3 +39,13 @@ CREATE TABLE channel_users (
     -- FOREIGN KEY(channel, last_seen_message_timestamp) REFERENCES channel_messages(channel, timestamp)
     PRIMARY KEY(channel, user)
 );
+
+CREATE TABLE private_messages (
+    timestamp INT NOT NULL PRIMARY KEY,
+    sender VARCHAR(255) NOT NULL,
+    receiver INT NOT NULL,
+    message VARCHAR(255) NOT NULL,
+    FOREIGN KEY(receiver) REFERENCES users(id)
+);
+
+CREATE INDEX private_messages_receiver ON private_messages(receiver);

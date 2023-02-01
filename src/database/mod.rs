@@ -48,6 +48,6 @@ pub async fn reserve_nick(
 }
 
 /// Compares a password to a hash stored in the database.
-pub fn verify_password(password: &[u8], hash: &PasswordHash) -> argon2::password_hash::Result<()> {
+pub fn verify_password(password: &[u8], hash: &PasswordHash<'_>) -> argon2::password_hash::Result<()> {
     Argon2::default().verify_password(password, hash)
 }

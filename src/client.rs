@@ -16,11 +16,14 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
-        FetchClientDetails, PeerToPeerMessage, ServerDisconnect, ServerFetchMotd,
+        FetchClientDetails, PrivateMessage, ServerDisconnect, ServerFetchMotd,
         UserKickedFromChannel, UserNickChange, UserNickChangeInternal,
     },
     persistence::{
-        events::{FetchUnseenMessages, FetchUserChannels, ReserveNick},
+        events::{
+            FetchUnseenChannelMessages, FetchUnseenPrivateMessages, FetchUserChannels,
+            FetchUserIdByNick, ReserveNick,
+        },
         Persistence,
     },
     server::Server,
@@ -92,6 +95,27 @@ impl Actor for Client {
                         channels: res.unwrap(),
                         span: this.span.clone(),
                     });
+                }),
+        );
+
+        ctx.spawn(
+            self.persistence
+                .send(FetchUnseenPrivateMessages {
+                    user_id: self.connection.user_id,
+                    span: Span::current(),
+                })
+                .into_actor(self)
+                .map(move |res, this, ctx| {
+                    for (sender, message) in res.unwrap() {
+                        ctx.notify(Broadcast {
+                            message: Message {
+                                tags: None,
+                                prefix: Some(Prefix::new_from_str(&sender)),
+                                command: Command::PRIVMSG(this.connection.nick.clone(), message),
+                            },
+                            span: this.span.clone(),
+                        });
+                    }
                 }),
         );
     }
@@ -185,7 +209,7 @@ impl Handler<JoinChannelRequest> for Client {
                 span: Span::current(),
             });
 
-            let channel_messages_fut = self.persistence.send(FetchUnseenMessages {
+            let channel_messages_fut = self.persistence.send(FetchUnseenChannelMessages {
                 channel_name: channel_name.to_string(),
                 user_id: self.connection.user_id,
                 span: Span::current(),
@@ -334,6 +358,35 @@ impl Handler<UserKickedFromChannel> for Client {
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: UserKickedFromChannel, _ctx: &mut Self::Context) -> Self::Result {
         self.channels.remove(&msg.channel);
+    }
+}
+
+/// Self-message to send a peer-to-peer message via the server.
+impl Handler<SendPrivateMessage> for Client {
+    type Result = ResponseActFuture<Self, ()>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: SendPrivateMessage, _ctx: &mut Self::Context) -> Self::Result {
+        self.persistence
+            .send(FetchUserIdByNick {
+                nick: msg.destination,
+            })
+            .into_actor(self)
+            .map(|res, this, ctx| {
+                let Some(destination) = res.unwrap() else {
+                    // TODO
+                    eprintln!("User attempted to send a message to non-existent user");
+                    return;
+                };
+
+                this.server.do_send(PrivateMessage {
+                    destination,
+                    message: msg.message,
+                    from: ctx.address(),
+                    span: msg.span,
+                });
+            })
+            .boxed_local()
     }
 }
 
@@ -511,10 +564,9 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::PRIVMSG(target, message) => {
                 if !target.is_channel_name() {
                     // private message to another user
-                    self.server.do_send(PeerToPeerMessage {
+                    ctx.notify(SendPrivateMessage {
                         destination: target,
                         message,
-                        from: ctx.address(),
                         span: Span::current(),
                     });
                 } else if let Some(channel) = self.channels.get(&target) {
@@ -643,6 +695,15 @@ impl WriteHandler<ProtocolError> for Client {
         error!(%error, "Failed to write message to client");
         Running::Continue
     }
+}
+
+/// A [`Client`] internal self-notification to send a peer-to-peer message to another user
+#[derive(actix::Message, Debug)]
+#[rtype(result = "()")]
+struct SendPrivateMessage {
+    destination: String,
+    message: String,
+    span: Span,
 }
 
 /// A [`Client`] internal self-notification to grab a list of users in each channel

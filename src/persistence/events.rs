@@ -52,6 +52,12 @@ pub struct SetUserChannelPermissions {
 }
 
 #[derive(Message)]
+#[rtype(result = "Option<UserId>")]
+pub struct FetchUserIdByNick {
+    pub nick: String,
+}
+
+#[derive(Message)]
 #[rtype(result = "()")]
 pub struct ChannelMessage {
     pub channel_id: ChannelId,
@@ -61,8 +67,23 @@ pub struct ChannelMessage {
 }
 
 #[derive(Message)]
+#[rtype(result = "()")]
+pub struct PrivateMessage {
+    pub sender: String,
+    pub receiver: UserId,
+    pub message: String,
+}
+
+#[derive(Message)]
 #[rtype(result = "Vec<(String, String)>")]
-pub struct FetchUnseenMessages {
+pub struct FetchUnseenPrivateMessages {
+    pub user_id: UserId,
+    pub span: Span,
+}
+
+#[derive(Message)]
+#[rtype(result = "Vec<(String, String)>")]
+pub struct FetchUnseenChannelMessages {
     pub channel_name: String,
     pub user_id: UserId,
     pub span: Span,

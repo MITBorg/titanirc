@@ -21,7 +21,7 @@ use crate::{
     connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
-        FetchClientByNick, PeerToPeerMessage, ServerDisconnect, ServerFetchMotd, UserConnected,
+        FetchClientByNick, PrivateMessage, ServerDisconnect, ServerFetchMotd, UserConnected,
         UserNickChange, UserNickChangeInternal,
     },
     persistence::Persistence,
@@ -73,7 +73,11 @@ impl Handler<UserConnected> for Server {
             ),
             (
                 Response::RPL_YOURHOST,
-                vec!["Your host is a sick kid".into()],
+                vec![format!(
+                    "Your host is {SERVER_NAME}, running version {}",
+                    crate_version!()
+                )
+                .into()],
             ),
             (
                 Response::RPL_CREATED,
@@ -257,35 +261,44 @@ impl Handler<ChannelList> for Server {
     }
 }
 
-// TODO: implement offline messaging and replay
-impl Handler<PeerToPeerMessage> for Server {
+impl Handler<PrivateMessage> for Server {
     type Result = ();
 
     #[instrument(parent = &msg.span, skip_all)]
-    fn handle(&mut self, msg: PeerToPeerMessage, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: PrivateMessage, _ctx: &mut Self::Context) -> Self::Result {
         let Some(source) = self.clients.get(&msg.from) else {
             // user is not yet registered with the server
             return;
         };
 
-        // TODO: O(1) lookup of users by nick
-        let target = self
+        let mut seen_by_user = false;
+
+        // TODO: O(1) lookup of users by id
+        for (target, target_conn) in self
             .clients
             .iter()
-            .find(|(_handle, connection)| connection.nick == msg.destination);
-        let Some((target, _)) = target else {
-            // return error to caller that user does not exist
-            return;
-        };
+            .filter(|(_handle, connection)| connection.user_id == msg.destination)
+        {
+            target.do_send(Broadcast {
+                message: Message {
+                    tags: None,
+                    prefix: Some(source.to_nick()),
+                    command: Command::PRIVMSG(target_conn.nick.clone(), msg.message.clone()),
+                },
+                span: msg.span.clone(),
+            });
 
-        target.do_send(Broadcast {
-            message: Message {
-                tags: None,
-                prefix: Some(source.to_nick()),
-                command: Command::PRIVMSG(msg.destination, msg.message),
-            },
-            span: msg.span,
-        });
+            seen_by_user = true;
+        }
+
+        if !seen_by_user {
+            self.persistence
+                .do_send(crate::persistence::events::PrivateMessage {
+                    sender: source.to_nick().to_string(),
+                    receiver: msg.destination,
+                    message: msg.message,
+                });
+        }
     }
 }
 

@@ -12,7 +12,8 @@ use crate::{
     connection::UserId,
     persistence::events::{
         ChannelCreated, ChannelJoined, ChannelMessage, ChannelParted,
-        FetchAllUserChannelPermissions, FetchUnseenMessages, FetchUserChannels, ReserveNick,
+        FetchAllUserChannelPermissions, FetchUnseenChannelMessages, FetchUnseenPrivateMessages,
+        FetchUserChannels, FetchUserIdByNick, PrivateMessage, ReserveNick,
         SetUserChannelPermissions,
     },
 };
@@ -203,6 +204,27 @@ impl Handler<FetchUserChannels> for Persistence {
     }
 }
 
+impl Handler<FetchUserIdByNick> for Persistence {
+    type Result = ResponseFuture<Option<UserId>>;
+
+    fn handle(&mut self, msg: FetchUserIdByNick, _ctx: &mut Self::Context) -> Self::Result {
+        let conn = self.database.clone();
+
+        Box::pin(async move {
+            sqlx::query_as(
+                "SELECT user
+                 FROM user_nicks
+                 WHERE nick = ?",
+            )
+            .bind(msg.nick)
+            .fetch_optional(&conn)
+            .await
+            .unwrap()
+            .map(|(v,)| v)
+        })
+    }
+}
+
 impl Handler<ChannelMessage> for Persistence {
     type Result = ResponseFuture<()>;
 
@@ -242,11 +264,63 @@ impl Handler<ChannelMessage> for Persistence {
     }
 }
 
-impl Handler<FetchUnseenMessages> for Persistence {
+impl Handler<PrivateMessage> for Persistence {
+    type Result = ResponseFuture<()>;
+
+    fn handle(&mut self, msg: PrivateMessage, _ctx: &mut Self::Context) -> Self::Result {
+        let conn = self.database.clone();
+        let timestamp = self.monotonically_increasing_id();
+
+        Box::pin(async move {
+            sqlx::query(
+                "INSERT INTO private_messages
+                 (timestamp, sender, receiver, message)
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind(timestamp)
+            .bind(msg.sender)
+            .bind(msg.receiver)
+            .bind(msg.message)
+            .execute(&conn)
+            .await
+            .unwrap();
+        })
+    }
+}
+
+impl Handler<FetchUnseenPrivateMessages> for Persistence {
+    type Result = ResponseFuture<Vec<(String, String)>>;
+
+    fn handle(
+        &mut self,
+        msg: FetchUnseenPrivateMessages,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        let conn = self.database.clone();
+
+        Box::pin(async move {
+            sqlx::query_as(
+                "DELETE FROM private_messages
+                 WHERE receiver = ?
+                 RETURNING sender, message",
+            )
+            .bind(msg.user_id)
+            .fetch_all(&conn)
+            .await
+            .unwrap()
+        })
+    }
+}
+
+impl Handler<FetchUnseenChannelMessages> for Persistence {
     type Result = ResponseFuture<Vec<(String, String)>>;
 
     #[instrument(parent = &msg.span, skip_all)]
-    fn handle(&mut self, msg: FetchUnseenMessages, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(
+        &mut self,
+        msg: FetchUnseenChannelMessages,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
         let conn = self.database.clone();
         let max_message_reply_since =
             Utc::now() - chrono::Duration::from_std(self.max_message_replay_since).unwrap();

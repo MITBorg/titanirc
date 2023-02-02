@@ -612,7 +612,23 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             }
             Command::STATS(_, _) => {}
             Command::LINKS(_, _) => {}
-            Command::TIME(_) => {}
+            Command::TIME(_) => {
+                let time = chrono::Utc::now();
+
+                self.writer.write(Message {
+                    tags: None,
+                    prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                    command: Command::Response(
+                        Response::RPL_TIME,
+                        vec![
+                            self.connection.nick.to_string(),
+                            SERVER_NAME.to_string(),
+                            time.timestamp().to_string(),
+                            time.format("%a %b %d %Y %T").to_string(),
+                        ],
+                    ),
+                });
+            }
             Command::CONNECT(_, _, _) => {}
             Command::TRACE(_) => {}
             Command::ADMIN(_) => {}

@@ -4,9 +4,11 @@ pub mod sasl;
 use std::{
     io::{Error, ErrorKind},
     net::SocketAddr,
+    str::FromStr,
 };
 
 use actix::{io::FramedWrite, Actor, Addr};
+use bitflags::bitflags;
 use const_format::concatcp;
 use futures::{SinkExt, TryStreamExt};
 use irc_proto::{
@@ -30,8 +32,6 @@ use crate::{
 pub type MessageStream = FramedRead<ReadHalf<TcpStream>, irc_proto::IrcCodec>;
 pub type MessageSink = FramedWrite<Message, WriteHalf<TcpStream>, irc_proto::IrcCodec>;
 
-pub const SUPPORTED_CAPABILITIES: &[&str] = &[concatcp!("sasl=", AuthStrategy::SUPPORTED)];
-
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, sqlx::Type)]
 #[sqlx(transparent)]
 pub struct UserId(pub i64);
@@ -44,6 +44,7 @@ pub struct ConnectionRequest {
     mode: Option<String>,
     real_name: Option<String>,
     user_id: Option<UserId>,
+    capabilities: Capability,
 }
 
 #[derive(Clone)]
@@ -54,6 +55,7 @@ pub struct InitiatedConnection {
     pub mode: String,
     pub real_name: String,
     pub user_id: UserId,
+    pub capabilities: Capability,
 }
 
 impl InitiatedConnection {
@@ -78,6 +80,7 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
             mode: Some(mode),
             real_name: Some(real_name),
             user_id: Some(user_id),
+            capabilities,
         } = value else {
             return Err(value);
         };
@@ -89,6 +92,7 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
             mode,
             real_name,
             user_id,
+            capabilities,
         })
     }
 }
@@ -140,15 +144,24 @@ pub async fn negotiate_client_connection(
                             Some("*".to_string()),
                             CapSubCommand::LS,
                             None,
-                            Some(SUPPORTED_CAPABILITIES.join(" ")),
+                            Some(Capability::SUPPORTED.join(" ")),
                         ),
                     })
                     .await
                     .unwrap();
             }
             Command::CAP(_, CapSubCommand::REQ, Some(arguments), None) => {
+                let acked = if arguments == "sasl" {
+                    true
+                } else if let Ok(capability) = Capability::from_str(&arguments) {
+                    request.capabilities |= capability;
+                    true
+                } else {
+                    false
+                };
+
                 write
-                    .send(AcknowledgedCapabilities(arguments).into_message())
+                    .send(AcknowledgedCapabilities(arguments, acked).into_message())
                     .await?;
             }
             Command::AUTHENTICATE(msg) => {
@@ -229,8 +242,8 @@ impl NickNotOwnedByUser {
     }
 }
 
-/// Return an acknowledgement to the client for their requested capabilities.
-pub struct AcknowledgedCapabilities(String);
+/// Return an ACK (or NAK) to the client for their requested capabilities.
+pub struct AcknowledgedCapabilities(String, bool);
 
 impl AcknowledgedCapabilities {
     #[must_use]
@@ -240,10 +253,39 @@ impl AcknowledgedCapabilities {
             prefix: None,
             command: Command::CAP(
                 Some("*".to_string()),
-                CapSubCommand::ACK,
+                if self.1 {
+                    CapSubCommand::ACK
+                } else {
+                    CapSubCommand::NAK
+                },
                 None,
                 Some(self.0),
             ),
+        }
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+    pub struct Capability: u32 {
+        const USERHOST_IN_NAMES = 0b0000_0000_0000_0000_0000_0000_0000_0001;
+    }
+}
+
+impl Capability {
+    pub const SUPPORTED: &'static [&'static str] = &[
+        "userhost-in-names",
+        concatcp!("sasl=", AuthStrategy::SUPPORTED),
+    ];
+}
+
+impl FromStr for Capability {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "userhost-in-names" => Ok(Self::USERHOST_IN_NAMES),
+            _ => Err(()),
         }
     }
 }

@@ -20,7 +20,7 @@ use crate::{
         },
     },
     client::Client,
-    connection::{InitiatedConnection, UserId},
+    connection::{Capability, InitiatedConnection, UserId},
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
@@ -381,7 +381,12 @@ impl Handler<ChannelJoin> for Channel {
         }
 
         // send the user list to the user
-        for message in ChannelNamesList::new(self).into_messages(msg.connection.nick.to_string()) {
+        for message in ChannelNamesList::new(self).into_messages(
+            msg.connection.nick.to_string(),
+            msg.connection
+                .capabilities
+                .contains(Capability::USERHOST_IN_NAMES),
+        ) {
             msg.client.do_send(Broadcast {
                 message,
                 span: Span::current(),

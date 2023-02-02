@@ -1,7 +1,9 @@
 use irc_proto::{Command, Message, Prefix, Response};
+use itertools::Itertools;
 
 use crate::{
-    channel::{Channel, CurrentChannelTopic},
+    channel::{permissions::Permission, Channel, CurrentChannelTopic},
+    connection::InitiatedConnection,
     SERVER_NAME,
 };
 
@@ -66,7 +68,7 @@ impl ChannelTopic {
 
 pub struct ChannelNamesList {
     pub channel_name: String,
-    pub nick_list: Vec<String>,
+    pub nick_list: Vec<(Permission, InitiatedConnection)>,
 }
 
 impl ChannelNamesList {
@@ -77,13 +79,7 @@ impl ChannelNamesList {
             nick_list: channel
                 .clients
                 .values()
-                .map(|v| {
-                    format!(
-                        "{}{}",
-                        channel.get_user_permissions(v.user_id).into_prefix(),
-                        v.nick
-                    )
-                })
+                .map(|v| (channel.get_user_permissions(v.user_id), v.clone()))
                 .collect(),
         }
     }
@@ -97,7 +93,21 @@ impl ChannelNamesList {
     }
 
     #[must_use]
-    pub fn into_messages(self, for_user: String) -> Vec<Message> {
+    pub fn into_messages(self, for_user: String, with_hostnames: bool) -> Vec<Message> {
+        let nick_list = self
+            .nick_list
+            .into_iter()
+            .map(|(permission, connection)| {
+                let permission = permission.into_prefix();
+
+                if with_hostnames {
+                    format!("{permission}{}", connection.to_nick())
+                } else {
+                    format!("{permission}{}", connection.nick)
+                }
+            })
+            .join(" ");
+
         vec![
             Message {
                 tags: None,
@@ -108,7 +118,7 @@ impl ChannelNamesList {
                         for_user.to_string(),
                         "=".to_string(),
                         self.channel_name,
-                        self.nick_list.join(" "),
+                        nick_list,
                     ],
                 ),
             },

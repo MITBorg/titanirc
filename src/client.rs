@@ -12,7 +12,7 @@ use tracing::{debug, error, info_span, instrument, warn, Instrument, Span};
 
 use crate::{
     channel::Channel,
-    connection::{sasl::SaslAlreadyAuthenticated, InitiatedConnection, MessageSink},
+    connection::{sasl::SaslAlreadyAuthenticated, Capability, InitiatedConnection, MessageSink},
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
@@ -281,7 +281,12 @@ impl Handler<ListChannelMemberRequest> for Client {
             for list in result {
                 let list = list.unwrap();
 
-                for message in list.into_messages(this.connection.nick.clone()) {
+                for message in list.into_messages(
+                    this.connection.nick.clone(),
+                    this.connection
+                        .capabilities
+                        .contains(Capability::USERHOST_IN_NAMES),
+                ) {
                     this.writer.write(message);
                 }
             }

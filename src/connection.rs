@@ -9,7 +9,9 @@ use std::{
 use actix::{io::FramedWrite, Actor, Addr};
 use const_format::concatcp;
 use futures::{SinkExt, TryStreamExt};
-use irc_proto::{error::ProtocolError, CapSubCommand, Command, IrcCodec, Message, Prefix};
+use irc_proto::{
+    error::ProtocolError, CapSubCommand, Command, IrcCodec, Message, Prefix, Response,
+};
 use tokio::{
     io::{ReadHalf, WriteHalf},
     net::TcpStream,
@@ -198,6 +200,10 @@ pub async fn negotiate_client_connection(
         .map_err(|e| ProtocolError::Io(Error::new(ErrorKind::InvalidData, e)))?;
 
     if !reserved_nick {
+        write
+            .send(NickNotOwnedByUser(initiated.nick).into_message())
+            .await?;
+
         return Err(ProtocolError::Io(Error::new(
             ErrorKind::InvalidData,
             "nick is already in use by another user",
@@ -205,6 +211,22 @@ pub async fn negotiate_client_connection(
     }
 
     Ok(Some(initiated))
+}
+
+pub struct NickNotOwnedByUser(String);
+
+impl NickNotOwnedByUser {
+    #[must_use]
+    pub fn into_message(self) -> Message {
+        Message {
+            tags: None,
+            prefix: None,
+            command: Command::Response(
+                Response::ERR_NICKLOCKED,
+                vec![self.0, "You must use a nick assigned to you".to_string()],
+            ),
+        }
+    }
 }
 
 /// Return an acknowledgement to the client for their requested capabilities.

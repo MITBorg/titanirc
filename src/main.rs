@@ -11,7 +11,8 @@ use actix::{io::FramedWrite, Actor, Addr, AsyncContext, Supervisor};
 use actix_rt::{Arbiter, System};
 use bytes::BytesMut;
 use clap::Parser;
-use irc_proto::IrcCodec;
+use futures::SinkExt;
+use irc_proto::{Command, IrcCodec, Message};
 use rand::seq::SliceRandom;
 use sqlx::migrate::Migrator;
 use tokio::{
@@ -147,9 +148,28 @@ async fn start_tcp_acceptor_loop(
 
             // ensure we have all the details required to actually connect the client to the server
             // (ie. we have a nick, user, etc)
-            let Some(connection) = connection::negotiate_client_connection(&mut read, &mut write, addr, &persistence, database).await.unwrap() else {
-                error!("Failed to fully handshake with client, dropping connection");
-                return;
+            let connection = match connection::negotiate_client_connection(&mut read, &mut write, addr, &persistence, database).await {
+                Ok(Some(v)) => v,
+                Ok(None) => {
+                    error!("Failed to fully handshake with client, dropping connection");
+
+                    let command = Command::ERROR("You must use SASL to connect to this server".to_string());
+                    if let Err(error) = write.send(Message { tags: None, prefix: None, command, }).await {
+                        error!(%error, "Failed to send error message to client, forcefully closing connection.");
+                    }
+
+                    return;
+                }
+                Err(error) => {
+                    error!(%error, "An error occurred whilst handshaking with client");
+
+                    let command = Command::ERROR(error.to_string());
+                    if let Err(error) = write.send(Message { tags: None, prefix: None, command, }).await {
+                        error!(%error, "Failed to send error message to client, forcefully closing connection.");
+                    }
+
+                    return;
+                }
             };
 
             // spawn the client's actor

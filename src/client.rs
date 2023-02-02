@@ -129,7 +129,11 @@ impl Actor for Client {
         // inform the server that the user is leaving the server
         self.server.do_send(ServerDisconnect {
             client: ctx.address(),
-            message: message.clone(),
+            message: if self.graceful_shutdown {
+                Some(format!("Quit: {}", message.as_deref().unwrap_or("")))
+            } else {
+                message.clone()
+            },
             span: Span::current(),
         });
 
@@ -142,23 +146,16 @@ impl Actor for Client {
             });
         }
 
-        // send the shutdown message to the client before we terminate the connection on
-        // return of this function
-        if self.graceful_shutdown {
-            self.writer.write(Message {
-                tags: None,
-                prefix: Some(self.connection.to_nick()),
-                command: Command::QUIT(message),
-            });
-        } else {
-            let message = message.unwrap_or_else(|| "Ungraceful shutdown".to_string());
-
-            self.writer.write(Message {
-                tags: None,
-                prefix: None,
-                command: Command::ERROR(message),
-            });
-        }
+        // acknowledge the client's quit message by sending an ERROR
+        self.writer.write(Message {
+            tags: None,
+            prefix: None,
+            command: Command::ERROR(if self.graceful_shutdown {
+                String::new()
+            } else {
+                message.unwrap_or_else(|| "Ungraceful shutdown".to_string())
+            }),
+        });
     }
 }
 

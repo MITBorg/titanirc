@@ -3,7 +3,7 @@ pub mod events;
 use std::{collections::HashMap, time::Duration};
 
 use actix::{AsyncContext, Context, Handler, ResponseFuture, WrapFuture};
-use chrono::Utc;
+use chrono::{DateTime, TimeZone, Utc};
 use itertools::Itertools;
 use tracing::instrument;
 
@@ -289,7 +289,7 @@ impl Handler<PrivateMessage> for Persistence {
 }
 
 impl Handler<FetchUnseenPrivateMessages> for Persistence {
-    type Result = ResponseFuture<Vec<(String, String)>>;
+    type Result = ResponseFuture<Vec<(DateTime<Utc>, String, String)>>;
 
     fn handle(
         &mut self,
@@ -302,18 +302,21 @@ impl Handler<FetchUnseenPrivateMessages> for Persistence {
             sqlx::query_as(
                 "DELETE FROM private_messages
                  WHERE receiver = ?
-                 RETURNING sender, message",
+                 RETURNING timestamp, sender, message",
             )
             .bind(msg.user_id)
             .fetch_all(&conn)
             .await
             .unwrap()
+            .into_iter()
+            .map(|(timestamp, sender, message)| (Utc.timestamp_nanos(timestamp), sender, message))
+            .collect()
         })
     }
 }
 
 impl Handler<FetchUnseenChannelMessages> for Persistence {
-    type Result = ResponseFuture<Vec<(String, String)>>;
+    type Result = ResponseFuture<Vec<(DateTime<Utc>, String, String)>>;
 
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(
@@ -328,9 +331,9 @@ impl Handler<FetchUnseenChannelMessages> for Persistence {
         Box::pin(async move {
             // select the last 500 messages, or the last message the user saw - whichever dataset
             // is smaller.
-            let res = sqlx::query_as(
+            sqlx::query_as(
                 "WITH channel AS (SELECT id FROM channels WHERE name = ?)
-                 SELECT sender, message
+                 SELECT timestamp, sender, message
                  FROM channel_messages
                  WHERE channel = (SELECT id FROM channel)
                     AND timestamp > MAX(
@@ -349,9 +352,10 @@ impl Handler<FetchUnseenChannelMessages> for Persistence {
             .bind(msg.user_id.0)
             .fetch_all(&conn)
             .await
-            .unwrap();
-
-            res
+            .unwrap()
+            .into_iter()
+            .map(|(timestamp, sender, message)| (Utc.timestamp_nanos(timestamp), sender, message))
+            .collect()
         })
     }
 }

@@ -47,7 +47,7 @@ pub struct ConnectionRequest {
     capabilities: Capability,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InitiatedConnection {
     pub host: SocketAddr,
     pub nick: String,
@@ -269,12 +269,14 @@ bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
     pub struct Capability: u32 {
         const USERHOST_IN_NAMES = 0b0000_0000_0000_0000_0000_0000_0000_0001;
+        const SERVER_TIME       = 0b0000_0000_0000_0000_0000_0000_0000_0010;
     }
 }
 
 impl Capability {
     pub const SUPPORTED: &'static [&'static str] = &[
         "userhost-in-names",
+        "server-time",
         concatcp!("sasl=", AuthStrategy::SUPPORTED),
     ];
 }
@@ -285,6 +287,7 @@ impl FromStr for Capability {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "userhost-in-names" => Ok(Self::USERHOST_IN_NAMES),
+            "server-time" => Ok(Self::SERVER_TIME),
             _ => Err(()),
         }
     }

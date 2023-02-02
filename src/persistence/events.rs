@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use actix::Message;
+use chrono::{DateTime, Utc};
 use tracing::Span;
 
 use crate::{
@@ -75,14 +76,14 @@ pub struct PrivateMessage {
 }
 
 #[derive(Message)]
-#[rtype(result = "Vec<(String, String)>")]
+#[rtype(result = "Vec<(DateTime<Utc>, String, String)>")]
 pub struct FetchUnseenPrivateMessages {
     pub user_id: UserId,
     pub span: Span,
 }
 
 #[derive(Message)]
-#[rtype(result = "Vec<(String, String)>")]
+#[rtype(result = "Vec<(DateTime<Utc>, String, String)>")]
 pub struct FetchUnseenChannelMessages {
     pub channel_name: String,
     pub user_id: UserId,

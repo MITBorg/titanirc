@@ -4,11 +4,14 @@ use actix::{
     fut::wrap_future, io::WriteHandler, Actor, ActorContext, ActorFutureExt, Addr, AsyncContext,
     Context, Handler, MessageResult, ResponseActFuture, Running, StreamHandler, WrapFuture,
 };
+use chrono::{DateTime, SecondsFormat, Utc};
 use clap::{crate_name, crate_version};
 use futures::FutureExt;
-use irc_proto::{error::ProtocolError, ChannelExt, Command, Message, Prefix, Response};
+use irc_proto::{
+    error::ProtocolError, message::Tag, ChannelExt, Command, Message, Prefix, Response,
+};
 use tokio::time::Instant;
-use tracing::{debug, error, info_span, instrument, warn, Instrument, Span};
+use tracing::{debug, error, info, info_span, instrument, warn, Instrument, Span};
 
 use crate::{
     channel::Channel,
@@ -57,6 +60,24 @@ pub struct Client {
     pub span: Span,
 }
 
+impl Client {
+    #[must_use]
+    pub fn maybe_build_time_tag(&self, time: DateTime<Utc>) -> Option<Tag> {
+        if !self
+            .connection
+            .capabilities
+            .contains(Capability::SERVER_TIME)
+        {
+            return None;
+        }
+
+        Some(Tag(
+            "time".to_string(),
+            Some(time.to_rfc3339_opts(SecondsFormat::Millis, true)),
+        ))
+    }
+}
+
 impl Actor for Client {
     type Context = Context<Self>;
 
@@ -65,6 +86,8 @@ impl Actor for Client {
     /// We currently just use this to schedule pings towards the client.
     #[instrument(parent = &self.span, skip_all)]
     fn started(&mut self, ctx: &mut Self::Context) {
+        info!(?self.connection, "Client has successfully joined to server");
+
         // schedule pings to the client
         ctx.run_interval(Duration::from_secs(30), |this, ctx| {
             let _span = info_span!(parent: &this.span, "ping").entered();
@@ -106,10 +129,12 @@ impl Actor for Client {
                 })
                 .into_actor(self)
                 .map(move |res, this, ctx| {
-                    for (sender, message) in res.unwrap() {
+                    for (sent, sender, message) in res.unwrap() {
                         ctx.notify(Broadcast {
                             message: Message {
-                                tags: None,
+                                tags: TagBuilder::default()
+                                    .insert(this.maybe_build_time_tag(sent))
+                                    .into(),
                                 prefix: Some(Prefix::new_from_str(&sender)),
                                 command: Command::PRIVMSG(this.connection.nick.clone(), message),
                             },
@@ -238,9 +263,11 @@ impl Handler<JoinChannelRequest> for Client {
 
                 this.channels.insert(channel_name.clone(), handle);
 
-                for (source, message) in messages {
+                for (sent, source, message) in messages {
                     this.writer.write(Message {
-                        tags: None,
+                        tags: TagBuilder::default()
+                            .insert(this.maybe_build_time_tag(sent))
+                            .into(),
                         prefix: Some(Prefix::new_from_str(&source)),
                         command: Command::PRIVMSG(channel_name.clone(), message),
                     });
@@ -695,6 +722,28 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::Response(_, _) => {}
             Command::Raw(_, _) => {}
         }
+    }
+}
+
+#[derive(Default)]
+pub struct TagBuilder {
+    inner: Vec<Tag>,
+}
+
+impl TagBuilder {
+    #[must_use]
+    pub fn insert(mut self, tag: impl Into<Option<Tag>>) -> Self {
+        if let Some(tag) = tag.into() {
+            self.inner.push(tag);
+        }
+
+        self
+    }
+}
+
+impl From<TagBuilder> for Option<Vec<Tag>> {
+    fn from(value: TagBuilder) -> Self {
+        Some(value.inner).filter(|v| !v.is_empty())
     }
 }
 

@@ -148,11 +148,21 @@ pub struct FetchClientDetails {
     pub span: Span,
 }
 
+#[derive(Copy, Clone, Debug, sqlx::Type)]
+#[repr(i16)]
+pub enum MessageKind {
+    /// PRIVMSG from a client
+    Normal = 0,
+    /// NOTICE from a client
+    Notice = 1,
+}
+
 /// Sends a message to a channel.
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct ChannelMessage {
     pub client: Addr<Client>,
+    pub kind: MessageKind,
     pub message: String,
     pub span: Span,
 }
@@ -179,6 +189,7 @@ pub struct FetchClientByNick {
 pub struct PrivateMessage {
     pub destination: UserId,
     pub message: String,
+    pub kind: MessageKind,
     pub from: Addr<Client>,
     pub span: Span,
 }

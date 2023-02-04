@@ -24,6 +24,7 @@ CREATE TABLE channel_messages (
       timestamp INT NOT NULL,
       sender VARCHAR(255),
       message VARCHAR(255),
+      kind SMALLINT NOT NULL,
       FOREIGN KEY(channel) REFERENCES channels(id),
       PRIMARY KEY(channel, timestamp)
 );
@@ -45,6 +46,7 @@ CREATE TABLE private_messages (
     sender VARCHAR(255) NOT NULL,
     receiver INT NOT NULL,
     message VARCHAR(255) NOT NULL,
+    kind SMALLINT NOT NULL,
     FOREIGN KEY(receiver) REFERENCES users(id)
 );
 

@@ -19,7 +19,7 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
-        FetchClientDetails, PrivateMessage, ServerDisconnect, ServerFetchMotd,
+        FetchClientDetails, MessageKind, PrivateMessage, ServerDisconnect, ServerFetchMotd,
         UserKickedFromChannel, UserNickChange, UserNickChangeInternal,
     },
     persistence::{
@@ -129,14 +129,21 @@ impl Actor for Client {
                 })
                 .into_actor(self)
                 .map(move |res, this, ctx| {
-                    for (sent, sender, message) in res.unwrap() {
+                    for (sent, sender, message, kind) in res.unwrap() {
                         ctx.notify(Broadcast {
                             message: Message {
                                 tags: TagBuilder::default()
                                     .insert(this.maybe_build_time_tag(sent))
                                     .into(),
                                 prefix: Some(Prefix::new_from_str(&sender)),
-                                command: Command::PRIVMSG(this.connection.nick.clone(), message),
+                                command: match kind {
+                                    MessageKind::Normal => {
+                                        Command::PRIVMSG(this.connection.nick.clone(), message)
+                                    }
+                                    MessageKind::Notice => {
+                                        Command::NOTICE(this.connection.nick.clone(), message)
+                                    }
+                                },
                             },
                             span: this.span.clone(),
                         });
@@ -263,13 +270,16 @@ impl Handler<JoinChannelRequest> for Client {
 
                 this.channels.insert(channel_name.clone(), handle);
 
-                for (sent, source, message) in messages {
+                for (sent, source, message, kind) in messages {
                     this.writer.write(Message {
                         tags: TagBuilder::default()
                             .insert(this.maybe_build_time_tag(sent))
                             .into(),
                         prefix: Some(Prefix::new_from_str(&source)),
-                        command: Command::PRIVMSG(channel_name.clone(), message),
+                        command: match kind {
+                            MessageKind::Normal => Command::PRIVMSG(channel_name.clone(), message),
+                            MessageKind::Notice => Command::NOTICE(channel_name.clone(), message),
+                        },
                     });
                 }
             }
@@ -401,7 +411,7 @@ impl Handler<SendPrivateMessage> for Client {
                 nick: msg.destination,
             })
             .into_actor(self)
-            .map(|res, this, ctx| {
+            .map(move |res, this, ctx| {
                 let Some(destination) = res.unwrap() else {
                     // TODO
                     eprintln!("User attempted to send a message to non-existent user");
@@ -411,6 +421,7 @@ impl Handler<SendPrivateMessage> for Client {
                 this.server.do_send(PrivateMessage {
                     destination,
                     message: msg.message,
+                    kind: msg.kind,
                     from: ctx.address(),
                     span: msg.span,
                 });
@@ -590,18 +601,26 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     });
                 }
             }
-            Command::PRIVMSG(target, message) => {
+            command @ (Command::NOTICE(_, _) | Command::PRIVMSG(_, _)) => {
+                let (target, message, kind) = match command {
+                    Command::PRIVMSG(target, message) => (target, message, MessageKind::Normal),
+                    Command::NOTICE(target, message) => (target, message, MessageKind::Notice),
+                    _ => unreachable!(),
+                };
+
                 if !target.is_channel_name() {
                     // private message to another user
                     ctx.notify(SendPrivateMessage {
                         destination: target,
                         message,
+                        kind,
                         span: Span::current(),
                     });
                 } else if let Some(channel) = self.channels.get(&target) {
                     channel.do_send(ChannelMessage {
                         client: ctx.address(),
                         message,
+                        kind,
                         span: Span::current(),
                     });
                 } else {
@@ -609,7 +628,6 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     error!("User not connected to channel");
                 }
             }
-            Command::NOTICE(_, _) => {}
             Command::MOTD(_) => {
                 let span = Span::current();
                 let fut = self
@@ -770,6 +788,7 @@ impl WriteHandler<ProtocolError> for Client {
 struct SendPrivateMessage {
     destination: String,
     message: String,
+    kind: MessageKind,
     span: Span,
 }
 

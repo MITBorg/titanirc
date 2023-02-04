@@ -10,6 +10,7 @@ use tracing::instrument;
 use crate::{
     channel::permissions::Permission,
     connection::UserId,
+    messages::MessageKind,
     persistence::events::{
         ChannelCreated, ChannelJoined, ChannelMessage, ChannelParted,
         FetchAllUserChannelPermissions, FetchUnseenChannelMessages, FetchUnseenPrivateMessages,
@@ -234,12 +235,13 @@ impl Handler<ChannelMessage> for Persistence {
 
         Box::pin(async move {
             sqlx::query(
-                "INSERT INTO channel_messages (channel, timestamp, sender, message) VALUES (?, ?, ?, ?)",
+                "INSERT INTO channel_messages (channel, timestamp, sender, message, kind) VALUES (?, ?, ?, ?, ?)",
             )
             .bind(msg.channel_id.0)
             .bind(timestamp)
             .bind(msg.sender)
             .bind(msg.message)
+            .bind(msg.kind)
             .execute(&conn)
             .await
             .unwrap();
@@ -274,13 +276,14 @@ impl Handler<PrivateMessage> for Persistence {
         Box::pin(async move {
             sqlx::query(
                 "INSERT INTO private_messages
-                 (timestamp, sender, receiver, message)
-                 VALUES (?, ?, ?, ?)",
+                 (timestamp, sender, receiver, message, kind)
+                 VALUES (?, ?, ?, ?, ?)",
             )
             .bind(timestamp)
             .bind(msg.sender)
             .bind(msg.receiver)
             .bind(msg.message)
+            .bind(msg.kind)
             .execute(&conn)
             .await
             .unwrap();
@@ -289,7 +292,7 @@ impl Handler<PrivateMessage> for Persistence {
 }
 
 impl Handler<FetchUnseenPrivateMessages> for Persistence {
-    type Result = ResponseFuture<Vec<(DateTime<Utc>, String, String)>>;
+    type Result = ResponseFuture<Vec<(DateTime<Utc>, String, String, MessageKind)>>;
 
     fn handle(
         &mut self,
@@ -302,21 +305,23 @@ impl Handler<FetchUnseenPrivateMessages> for Persistence {
             sqlx::query_as(
                 "DELETE FROM private_messages
                  WHERE receiver = ?
-                 RETURNING timestamp, sender, message",
+                 RETURNING timestamp, sender, message, kind",
             )
             .bind(msg.user_id)
             .fetch_all(&conn)
             .await
             .unwrap()
             .into_iter()
-            .map(|(timestamp, sender, message)| (Utc.timestamp_nanos(timestamp), sender, message))
+            .map(|(timestamp, sender, message, kind)| {
+                (Utc.timestamp_nanos(timestamp), sender, message, kind)
+            })
             .collect()
         })
     }
 }
 
 impl Handler<FetchUnseenChannelMessages> for Persistence {
-    type Result = ResponseFuture<Vec<(DateTime<Utc>, String, String)>>;
+    type Result = ResponseFuture<Vec<(DateTime<Utc>, String, String, MessageKind)>>;
 
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(
@@ -333,7 +338,7 @@ impl Handler<FetchUnseenChannelMessages> for Persistence {
             // is smaller.
             sqlx::query_as(
                 "WITH channel AS (SELECT id FROM channels WHERE name = ?)
-                 SELECT timestamp, sender, message
+                 SELECT timestamp, sender, message, kind
                  FROM channel_messages
                  WHERE channel = (SELECT id FROM channel)
                     AND timestamp > MAX(
@@ -354,7 +359,9 @@ impl Handler<FetchUnseenChannelMessages> for Persistence {
             .await
             .unwrap()
             .into_iter()
-            .map(|(timestamp, sender, message)| (Utc.timestamp_nanos(timestamp), sender, message))
+            .map(|(timestamp, sender, message, kind)| {
+                (Utc.timestamp_nanos(timestamp), sender, message, kind)
+            })
             .collect()
         })
     }

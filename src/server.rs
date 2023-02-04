@@ -21,8 +21,8 @@ use crate::{
     connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
-        FetchClientByNick, PrivateMessage, ServerDisconnect, ServerFetchMotd, UserConnected,
-        UserNickChange, UserNickChangeInternal,
+        FetchClientByNick, MessageKind, PrivateMessage, ServerDisconnect, ServerFetchMotd,
+        UserConnected, UserNickChange, UserNickChangeInternal,
     },
     persistence::Persistence,
     server::response::Motd,
@@ -274,16 +274,21 @@ impl Handler<PrivateMessage> for Server {
         let mut seen_by_user = false;
 
         // TODO: O(1) lookup of users by id
-        for (target, target_conn) in self
-            .clients
-            .iter()
-            .filter(|(_handle, connection)| connection.user_id == msg.destination)
-        {
+        for (target, target_conn) in self.clients.iter().filter(|(handle, connection)| {
+            connection.user_id == msg.destination && msg.from != **handle
+        }) {
             target.do_send(Broadcast {
                 message: Message {
                     tags: None,
                     prefix: Some(source.to_nick()),
-                    command: Command::PRIVMSG(target_conn.nick.clone(), msg.message.clone()),
+                    command: match msg.kind {
+                        MessageKind::Normal => {
+                            Command::PRIVMSG(target_conn.nick.clone(), msg.message.clone())
+                        }
+                        MessageKind::Notice => {
+                            Command::NOTICE(target_conn.nick.clone(), msg.message.clone())
+                        }
+                    },
                 },
                 span: msg.span.clone(),
             });
@@ -297,6 +302,7 @@ impl Handler<PrivateMessage> for Server {
                     sender: source.to_nick().to_string(),
                     receiver: msg.destination,
                     message: msg.message,
+                    kind: msg.kind,
                 });
         }
     }

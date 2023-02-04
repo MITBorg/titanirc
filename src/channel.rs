@@ -24,7 +24,7 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
-        FetchClientByNick, ServerDisconnect, UserKickedFromChannel, UserNickChange,
+        FetchClientByNick, MessageKind, ServerDisconnect, UserKickedFromChannel, UserNickChange,
     },
     persistence::{
         events::{FetchAllUserChannelPermissions, SetUserChannelPermissions},
@@ -152,6 +152,7 @@ impl Handler<ChannelMessage> for Channel {
                 sender: nick.to_string(),
                 message: msg.message.to_string(),
                 receivers: self.clients.values().map(|v| v.user_id).collect(),
+                kind: msg.kind,
             });
 
         for client in self.clients.keys() {
@@ -166,7 +167,14 @@ impl Handler<ChannelMessage> for Channel {
                 message: Message {
                     tags: None,
                     prefix: Some(nick.clone()),
-                    command: Command::PRIVMSG(self.name.to_string(), msg.message.clone()),
+                    command: match msg.kind {
+                        MessageKind::Normal => {
+                            Command::PRIVMSG(self.name.to_string(), msg.message.clone())
+                        }
+                        MessageKind::Notice => {
+                            Command::NOTICE(self.name.to_string(), msg.message.clone())
+                        }
+                    },
                 },
             });
         }

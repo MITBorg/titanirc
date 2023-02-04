@@ -7,6 +7,7 @@ use tracing::Span;
 use crate::{
     channel::{permissions::Permission, ChannelId},
     connection::UserId,
+    messages::MessageKind,
 };
 
 #[derive(Message)]
@@ -65,6 +66,7 @@ pub struct ChannelMessage {
     pub sender: String,
     pub message: String,
     pub receivers: Vec<UserId>,
+    pub kind: MessageKind,
 }
 
 #[derive(Message)]
@@ -73,17 +75,18 @@ pub struct PrivateMessage {
     pub sender: String,
     pub receiver: UserId,
     pub message: String,
+    pub kind: MessageKind,
 }
 
 #[derive(Message)]
-#[rtype(result = "Vec<(DateTime<Utc>, String, String)>")]
+#[rtype(result = "Vec<(DateTime<Utc>, String, String, MessageKind)>")]
 pub struct FetchUnseenPrivateMessages {
     pub user_id: UserId,
     pub span: Span,
 }
 
 #[derive(Message)]
-#[rtype(result = "Vec<(DateTime<Utc>, String, String)>")]
+#[rtype(result = "Vec<(DateTime<Utc>, String, String, MessageKind)>")]
 pub struct FetchUnseenChannelMessages {
     pub channel_name: String,
     pub user_id: UserId,

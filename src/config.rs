@@ -57,8 +57,8 @@ impl FromStr for Config {
     type Err = std::io::Error;
 
     fn from_str(path: &str) -> Result<Self, Self::Err> {
-        let contents = std::fs::read(path)?;
-        toml::from_slice(&contents)
+        let contents = std::fs::read_to_string(path)?;
+        toml::from_str(&contents)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 }

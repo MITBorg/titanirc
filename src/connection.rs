@@ -226,7 +226,7 @@ pub async fn negotiate_client_connection(
     Ok(Some(initiated))
 }
 
-pub struct NickNotOwnedByUser(String);
+pub struct NickNotOwnedByUser(pub String);
 
 impl NickNotOwnedByUser {
     #[must_use]
@@ -235,8 +235,8 @@ impl NickNotOwnedByUser {
             tags: None,
             prefix: None,
             command: Command::Response(
-                Response::ERR_NICKLOCKED,
-                vec![self.0, "You must use a nick assigned to you".to_string()],
+                Response::ERR_NICKNAMEINUSE,
+                vec![self.0, "Nickname is already in use".to_string()],
             ),
         }
     }

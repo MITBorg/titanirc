@@ -183,3 +183,39 @@ impl ChannelInviteResult {
 pub enum ChannelJoinRejectionReason {
     Banned,
 }
+
+impl ChannelJoinRejectionReason {
+    #[must_use]
+    pub fn into_message(self) -> Message {
+        match self {
+            Self::Banned => Message {
+                tags: None,
+                prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                command: Command::Response(
+                    Response::ERR_BANNEDFROMCHAN,
+                    vec!["Cannot join channel (+b)".to_string()],
+                ),
+            },
+        }
+    }
+}
+
+pub struct MissingPrivileges(pub Prefix, pub String);
+
+impl MissingPrivileges {
+    #[must_use]
+    pub fn into_message(self) -> Message {
+        Message {
+            tags: None,
+            prefix: None,
+            command: Command::Response(
+                Response::ERR_CHANOPRIVSNEEDED,
+                vec![
+                    self.0.to_string(),
+                    self.1,
+                    "You're not channel operator".to_string(),
+                ],
+            ),
+        }
+    }
+}

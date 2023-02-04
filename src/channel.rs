@@ -9,7 +9,7 @@ use actix::{
 };
 use chrono::{DateTime, Utc};
 use futures::future::Either;
-use irc_proto::{Command, Message, Mode};
+use irc_proto::{Command, Message, Mode, Response};
 use tracing::{debug, error, info, instrument, warn, Span};
 
 use crate::{
@@ -17,6 +17,7 @@ use crate::{
         permissions::Permission,
         response::{
             ChannelInviteResult, ChannelJoinRejectionReason, ChannelNamesList, ChannelTopic,
+            MissingPrivileges,
         },
     },
     client::Client,
@@ -137,8 +138,22 @@ impl Handler<ChannelMessage> for Channel {
         };
 
         if !self.get_user_permissions(sender.user_id).can_chatter() {
-            // TODO
-            error!("User cannot send message to channel");
+            msg.client.do_send(Broadcast {
+                message: Message {
+                    tags: None,
+                    prefix: None,
+                    command: Command::Response(
+                        Response::ERR_CANNOTSENDTOCHAN,
+                        vec![
+                            sender.to_nick().to_string(),
+                            self.name.to_string(),
+                            "Cannot send to channel".to_string(),
+                        ],
+                    ),
+                },
+                span: Span::current(),
+            });
+
             return;
         }
 
@@ -421,8 +436,12 @@ impl Handler<ChannelUpdateTopic> for Channel {
             .get_user_permissions(client_info.user_id)
             .can_set_topic()
         {
-            // TODO
-            error!("User cannot set channel topic");
+            error!("User attempted to set channel topic without privileges");
+            msg.client.do_send(Broadcast {
+                message: MissingPrivileges(client_info.to_nick(), self.name.to_string())
+                    .into_message(),
+                span: Span::current(),
+            });
             return;
         }
 
@@ -455,8 +474,11 @@ impl Handler<ChannelKickUser> for Channel {
         };
 
         if !self.get_user_permissions(kicker.user_id).can_kick() {
-            // TODO
             error!("Kicker can not kick people from the channel");
+            msg.client.do_send(Broadcast {
+                message: MissingPrivileges(kicker.to_nick(), self.name.to_string()).into_message(),
+                span: Span::current(),
+            });
             return;
         }
 

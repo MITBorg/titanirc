@@ -15,7 +15,10 @@ use tracing::{debug, error, info, info_span, instrument, warn, Instrument, Span}
 
 use crate::{
     channel::Channel,
-    connection::{sasl::SaslAlreadyAuthenticated, Capability, InitiatedConnection, MessageSink},
+    connection::{
+        sasl::SaslAlreadyAuthenticated, Capability, InitiatedConnection, MessageSink,
+        NickNotOwnedByUser,
+    },
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
@@ -263,7 +266,8 @@ impl Handler<JoinChannelRequest> for Client {
                 let handle = match handle {
                     Ok(v) => v,
                     Err(error) => {
-                        error!(?error, "Failed to join user to channel");
+                        error!(?error, "User failed to join channel");
+                        this.writer.write(error.into_message());
                         continue;
                     }
                 };
@@ -346,7 +350,10 @@ impl Handler<UserNickChangeInternal> for Client {
             .into_actor(self)
             .map(|res, this, ctx| {
                 if !res.unwrap() {
-                    // TODO: send notification to user to say the nick isn't available
+                    ctx.notify(Broadcast {
+                        message: NickNotOwnedByUser(msg.new_nick).into_message(),
+                        span: Span::current(),
+                    });
                     return;
                 }
 
@@ -667,7 +674,7 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
 
                 self.writer.write(Message {
                     tags: None,
-                    prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                    prefix: None,
                     command: Command::Response(
                         Response::RPL_TIME,
                         vec![

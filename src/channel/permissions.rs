@@ -90,8 +90,8 @@ impl Permission {
 
     /// Returns true, if the user is allowed to kick people from the channel.
     #[must_use]
-    pub fn can_kick(self) -> bool {
-        self == Self::Operator
+    pub const fn can_kick(self) -> bool {
+        (self as i16) >= (Self::HalfOperator as i16)
     }
 
     /// Returns true, if the user is allowed to set the given permission on another

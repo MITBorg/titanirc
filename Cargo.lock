@@ -136,9 +136,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e196f430604fcd7503056c5aaa7dfc5bc570582b928240622b075b5cad3b90dd"
+checksum = "c4a03f1cd193cbed3c9d3375ed0c1b795ef7ddbeb67c31ae93ffe6bb6a282da6"
 
 [[package]]
 name = "blake2"
@@ -1593,7 +1593,7 @@ dependencies = [
  "anyhow",
  "argon2",
  "base64 0.21.0",
- "bitflags 2.0.0-rc.1",
+ "bitflags 2.0.0-rc.3",
  "bytes",
  "chrono",
  "clap",

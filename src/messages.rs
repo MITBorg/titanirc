@@ -122,6 +122,13 @@ pub struct ServerListUsers {
     pub span: Span,
 }
 
+/// Returns the result of `ADMIN`.
+#[derive(Message)]
+#[rtype(result = "super::server::response::AdminInfo")]
+pub struct ServerAdminInfo {
+    pub span: Span,
+}
+
 /// Sent from channels to users when a user is removed from the channel.
 #[derive(Message)]
 #[rtype(result = "()")]

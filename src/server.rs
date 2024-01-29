@@ -21,11 +21,11 @@ use crate::{
     connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
-        FetchClientByNick, MessageKind, PrivateMessage, ServerDisconnect, ServerFetchMotd,
-        ServerListUsers, UserConnected, UserNickChange, UserNickChangeInternal,
+        FetchClientByNick, MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect,
+        ServerFetchMotd, ServerListUsers, UserConnected, UserNickChange, UserNickChangeInternal,
     },
     persistence::Persistence,
-    server::response::{ListUsers, Motd},
+    server::response::{AdminInfo, ListUsers, Motd},
     SERVER_NAME,
 };
 
@@ -272,6 +272,18 @@ impl Handler<ServerListUsers> for Server {
             max_clients: self.max_clients,
             operators_online: 0,
             channels_formed: self.channels.len(),
+        })
+    }
+}
+
+impl Handler<ServerAdminInfo> for Server {
+    type Result = MessageResult<ServerAdminInfo>;
+
+    fn handle(&mut self, _msg: ServerAdminInfo, _ctx: &mut Self::Context) -> Self::Result {
+        MessageResult(AdminInfo {
+            line1: "Name: example name".to_string(),
+            line2: "Nickname: examplenick".to_string(),
+            email: "Email: me@example.com".to_string(),
         })
     }
 }

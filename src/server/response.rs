@@ -2,6 +2,42 @@ use irc_proto::{Command, Message, Prefix, Response};
 
 use crate::{server::Server, SERVER_NAME};
 
+pub struct AdminInfo {
+    pub line1: String,
+    pub line2: String,
+    pub email: String,
+}
+
+impl AdminInfo {
+    #[must_use]
+    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+        macro_rules! msg {
+            ($response:ident, $($payload:expr),*) => {
+
+                Message {
+                    tags: None,
+                    prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                    command: Command::Response(
+                        Response::$response,
+                        vec![for_user.to_string(), $($payload),*],
+                    ),
+                }
+            };
+        }
+
+        vec![
+            msg!(
+                RPL_ADMINME,
+                SERVER_NAME.to_string(),
+                "Administrative info".to_string()
+            ),
+            msg!(RPL_ADMINLOC1, self.line1),
+            msg!(RPL_ADMINLOC2, self.line2),
+            msg!(RPL_ADMINEMAIL, self.email),
+        ]
+    }
+}
+
 pub struct ListUsers {
     pub current_clients: usize,
     pub max_clients: usize,

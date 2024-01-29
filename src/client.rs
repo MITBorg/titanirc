@@ -23,8 +23,9 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
-        FetchClientDetails, MessageKind, PrivateMessage, ServerDisconnect, ServerFetchMotd,
-        ServerListUsers, UserKickedFromChannel, UserNickChange, UserNickChangeInternal,
+        FetchClientDetails, MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect,
+        ServerFetchMotd, ServerListUsers, UserKickedFromChannel, UserNickChange,
+        UserNickChangeInternal,
     },
     persistence::{
         events::{
@@ -487,9 +488,7 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     span: Span::current(),
                 });
             }
-            Command::OPER(_, _) => {}
             Command::UserMODE(_, _) => {}
-            Command::SERVICE(_, _, _, _, _, _) => {}
             Command::QUIT(message) => {
                 // set the user's leave reason and request a shutdown of the actor to close the
                 // connection
@@ -497,7 +496,6 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                 self.server_leave_reason = message;
                 ctx.stop();
             }
-            Command::SQUIT(_, _) => {}
             Command::JOIN(channel_names, _passwords, _real_name) => {
                 // split the list of channel names...
                 let channels = parse_channel_name_list(&channel_names);
@@ -706,7 +704,19 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     ),
                 });
             }
-            Command::ADMIN(_) => {}
+            Command::ADMIN(_) => {
+                let span = Span::current();
+                let fut = self
+                    .server
+                    .send(ServerAdminInfo { span })
+                    .into_actor(self)
+                    .map(|result, this, _ctx| {
+                        for message in result.unwrap().into_messages(&this.connection.nick) {
+                            this.writer.write(message);
+                        }
+                    });
+                ctx.spawn(fut);
+            }
             Command::INFO(_) => {}
             Command::SERVLIST(_, _) => {}
             Command::SQUERY(_, _) => {}

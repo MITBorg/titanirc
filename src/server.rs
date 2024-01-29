@@ -25,9 +25,9 @@ use crate::{
     connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelJoin, ChannelList,
-        ChannelMemberList, ConnectedChannels, FetchClientByNick, FetchWhoList, FetchWhois,
-        MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect, ServerFetchMotd,
-        ServerListUsers, UserConnected, UserNickChange, UserNickChangeInternal,
+        ChannelMemberList, ClientAway, ConnectedChannels, FetchClientByNick, FetchWhoList,
+        FetchWhois, MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect,
+        ServerFetchMotd, ServerListUsers, UserConnected, UserNickChange, UserNickChangeInternal,
     },
     persistence::Persistence,
     server::response::{AdminInfo, ListUsers, Motd, WhoList, Whois},
@@ -211,6 +211,16 @@ impl Handler<UserNickChange> for Server {
         if let Some(client) = self.clients.get_mut(&msg.client) {
             *client = msg.connection;
             client.nick = msg.new_nick;
+        }
+    }
+}
+
+impl Handler<ClientAway> for Server {
+    type Result = ();
+
+    fn handle(&mut self, msg: ClientAway, _ctx: &mut Self::Context) -> Self::Result {
+        if let Some(c) = self.clients.get_mut(&msg.handle) {
+            c.away = msg.message;
         }
     }
 }

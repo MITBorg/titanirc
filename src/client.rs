@@ -23,7 +23,7 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
         ChannelKickUser, ChannelList, ChannelMemberList, ChannelMessage, ChannelPart,
-        ChannelSetMode, ChannelUpdateTopic, ConnectedChannels, FetchClientDetails,
+        ChannelSetMode, ChannelUpdateTopic, ClientAway, ConnectedChannels, FetchClientDetails,
         FetchUserPermission, FetchWhoList, FetchWhois, MessageKind, PrivateMessage,
         ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers, UserKickedFromChannel,
         UserNickChange, UserNickChangeInternal,
@@ -280,6 +280,50 @@ impl Handler<FetchClientDetails> for Client {
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: FetchClientDetails, _ctx: &mut Self::Context) -> Self::Result {
         MessageResult(self.connection.clone())
+    }
+}
+
+impl Handler<SetAway> for Client {
+    type Result = ();
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: SetAway, ctx: &mut Self::Context) -> Self::Result {
+        self.connection.away = msg.msg.filter(|msg| !msg.is_empty());
+
+        let broadcast = ClientAway {
+            span: msg.span,
+            handle: ctx.address(),
+            message: self.connection.away.clone(),
+        };
+
+        self.server.do_send(broadcast.clone());
+        for channel in self.channels.values() {
+            channel.do_send(broadcast.clone());
+        }
+
+        let resp = if self.connection.away.is_some() {
+            Command::Response(
+                Response::RPL_NOWAWAY,
+                vec![
+                    self.connection.nick.to_string(),
+                    "You have been marked as being away".to_string(),
+                ],
+            )
+        } else {
+            Command::Response(
+                Response::RPL_UNAWAY,
+                vec![
+                    self.connection.nick.to_string(),
+                    "You are no longer marked as being away".to_string(),
+                ],
+            )
+        };
+
+        self.writer.write(Message {
+            tags: None,
+            prefix: None,
+            command: resp,
+        });
     }
 }
 
@@ -838,7 +882,12 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::PONG(_, _) => {
                 self.last_active = Instant::now();
             }
-            Command::AWAY(_) => {}
+            Command::AWAY(msg) => {
+                ctx.notify(SetAway {
+                    span: Span::current(),
+                    msg,
+                });
+            }
             Command::REHASH => {}
             Command::DIE => {}
             Command::RESTART => {}
@@ -955,5 +1004,13 @@ struct ListChannelMemberRequest {
 #[rtype(result = "()")]
 struct JoinChannelRequest {
     channels: Vec<String>,
+    span: Span,
+}
+
+/// A [`Client`] internal self-notification to set away status
+#[derive(actix::Message, Debug)]
+#[rtype(result = "()")]
+struct SetAway {
+    msg: Option<String>,
     span: Span,
 }

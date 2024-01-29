@@ -25,8 +25,8 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
         ChannelKickUser, ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode,
-        ChannelUpdateTopic, FetchClientByNick, FetchUserPermission, MessageKind, ServerDisconnect,
-        UserKickedFromChannel, UserNickChange,
+        ChannelUpdateTopic, ClientAway, FetchClientByNick, FetchUserPermission, MessageKind,
+        ServerDisconnect, UserKickedFromChannel, UserNickChange,
     },
     persistence::{
         events::{FetchAllUserChannelPermissions, SetUserChannelPermissions},
@@ -111,6 +111,25 @@ impl Handler<Broadcast> for Channel {
     fn handle(&mut self, msg: Broadcast, _ctx: &mut Self::Context) -> Self::Result {
         for client in self.clients.keys() {
             client.do_send(msg.clone());
+        }
+    }
+}
+
+impl Handler<ClientAway> for Channel {
+    type Result = ();
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ClientAway, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(c) = self.clients.get_mut(&msg.handle) {
+            c.away = msg.message;
+            ctx.notify(Broadcast {
+                message: Message {
+                    tags: None,
+                    prefix: Some(c.to_nick()),
+                    command: Command::AWAY(c.away.clone()),
+                },
+                span: msg.span,
+            });
         }
     }
 }

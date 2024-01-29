@@ -54,6 +54,15 @@ pub struct ConnectedChannels {
     pub span: Span,
 }
 
+/// Marks the client as being away (or not away, if `message` is none)
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct ClientAway {
+    pub span: Span,
+    pub handle: Addr<Client>,
+    pub message: Option<String>,
+}
+
 /// Fetches all the channels visible to the user.
 #[derive(Message, Clone)]
 #[rtype(result = "super::server::response::ChannelList")]

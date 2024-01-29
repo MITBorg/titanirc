@@ -89,7 +89,7 @@ impl ChannelWhoList {
         let mut out = Vec::with_capacity(self.nick_list.len());
 
         for (perm, conn) in self.nick_list {
-            let presence = if conn.presence { "H" } else { "G" };
+            let presence = if conn.away.is_some() { "G" } else { "H" };
 
             out.push(Message {
                 tags: None,

@@ -25,7 +25,7 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
         ChannelKickUser, ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode,
-        ChannelUpdateTopic, FetchClientByNick, MessageKind, ServerDisconnect,
+        ChannelUpdateTopic, FetchClientByNick, FetchUserPermission, MessageKind, ServerDisconnect,
         UserKickedFromChannel, UserNickChange,
     },
     persistence::{
@@ -112,6 +112,15 @@ impl Handler<Broadcast> for Channel {
         for client in self.clients.keys() {
             client.do_send(msg.clone());
         }
+    }
+}
+
+/// Fetches the user's permission for the current channel.
+impl Handler<FetchUserPermission> for Channel {
+    type Result = MessageResult<FetchUserPermission>;
+
+    fn handle(&mut self, msg: FetchUserPermission, _ctx: &mut Self::Context) -> Self::Result {
+        MessageResult(self.get_user_permissions(msg.user))
     }
 }
 

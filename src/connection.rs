@@ -11,6 +11,7 @@ use std::{
 
 use actix::{io::FramedWrite, Actor, Addr};
 use bitflags::bitflags;
+use chrono::Utc;
 use const_format::concatcp;
 use futures::{SinkExt, TryStreamExt};
 use irc_proto::{
@@ -58,7 +59,8 @@ pub struct InitiatedConnection {
     pub real_name: String,
     pub user_id: UserId,
     pub capabilities: Capability,
-    pub presence: bool,
+    pub away: Option<String>,
+    pub at: chrono::DateTime<Utc>,
 }
 
 impl InitiatedConnection {
@@ -97,7 +99,8 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
             real_name,
             user_id,
             capabilities,
-            presence: true,
+            away: None,
+            at: Utc::now(),
         })
     }
 }

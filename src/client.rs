@@ -23,9 +23,10 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
         ChannelKickUser, ChannelList, ChannelMemberList, ChannelMessage, ChannelPart,
-        ChannelSetMode, ChannelUpdateTopic, FetchClientDetails, FetchWhoList, MessageKind,
-        PrivateMessage, ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers,
-        UserKickedFromChannel, UserNickChange, UserNickChangeInternal,
+        ChannelSetMode, ChannelUpdateTopic, ConnectedChannels, FetchClientDetails,
+        FetchUserPermission, FetchWhoList, FetchWhois, MessageKind, PrivateMessage,
+        ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers, UserKickedFromChannel,
+        UserNickChange, UserNickChangeInternal,
     },
     persistence::{
         events::{
@@ -215,10 +216,42 @@ impl Handler<Broadcast> for Client {
     }
 }
 
+/// Retrieves all the channels the user is connected to.
+impl Handler<ConnectedChannels> for Client {
+    type Result = ResponseFuture<<ConnectedChannels as actix::Message>::Result>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ConnectedChannels, _ctx: &mut Self::Context) -> Self::Result {
+        let span = Span::current();
+        let user_id = self.connection.user_id;
+
+        let fut = self.channels.iter().map(move |(channel_name, handle)| {
+            let span = span.clone();
+            let channel_name = channel_name.to_string();
+            let handle = handle.clone();
+
+            async move {
+                let permission = handle
+                    .send(FetchUserPermission {
+                        span,
+                        user: user_id,
+                    })
+                    .await
+                    .unwrap();
+
+                (permission, channel_name)
+            }
+        });
+
+        Box::pin(future::join_all(fut))
+    }
+}
+
 /// Retrieves the entire WHO list for the user.
 impl Handler<FetchWhoList> for Client {
     type Result = ResponseFuture<<FetchWhoList as actix::Message>::Result>;
 
+    #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: FetchWhoList, _ctx: &mut Self::Context) -> Self::Result {
         let user_id = self.connection.user_id;
 
@@ -780,7 +813,19 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     });
                 ctx.spawn(fut);
             }
-            Command::WHOIS(_, _) => {}
+            Command::WHOIS(Some(query), _) => {
+                let span = Span::current();
+                let fut = self
+                    .server
+                    .send(FetchWhois { span, query })
+                    .into_actor(self)
+                    .map(|result, this, _ctx| {
+                        for message in result.unwrap().into_messages(&this.connection.nick) {
+                            this.writer.write(message);
+                        }
+                    });
+                ctx.spawn(fut);
+            }
             Command::WHOWAS(_, _, _) => {}
             Command::KILL(_, _) => {}
             Command::PING(v, _) => {

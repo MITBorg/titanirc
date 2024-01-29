@@ -9,6 +9,7 @@ use actix::{
 use actix_rt::Arbiter;
 use clap::crate_version;
 use futures::{
+    future,
     stream::{FuturesOrdered, FuturesUnordered},
     TryFutureExt,
 };
@@ -24,12 +25,12 @@ use crate::{
     connection::InitiatedConnection,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelJoin, ChannelList,
-        ChannelMemberList, FetchClientByNick, FetchWhoList, MessageKind, PrivateMessage,
-        ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers, UserConnected,
-        UserNickChange, UserNickChangeInternal,
+        ChannelMemberList, ConnectedChannels, FetchClientByNick, FetchWhoList, FetchWhois,
+        MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect, ServerFetchMotd,
+        ServerListUsers, UserConnected, UserNickChange, UserNickChangeInternal,
     },
     persistence::Persistence,
-    server::response::{AdminInfo, ListUsers, Motd, WhoList},
+    server::response::{AdminInfo, ListUsers, Motd, WhoList, Whois},
     SERVER_NAME,
 };
 
@@ -226,6 +227,35 @@ impl Handler<FetchClientByNick> for Server {
                 .find(|(_handle, connection)| connection.nick == msg.nick)
                 .map(|v| v.0.clone()),
         )
+    }
+}
+
+impl Handler<FetchWhois> for Server {
+    type Result = ResponseFuture<<FetchWhois as actix::Message>::Result>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: FetchWhois, _ctx: &mut Self::Context) -> Self::Result {
+        let Some((handle, conn)) = self.clients.iter().find(|(_, conn)| conn.nick == msg.query)
+        else {
+            return Box::pin(future::ready(Whois {
+                query: msg.query,
+                conn: None,
+                channels: vec![],
+            }));
+        };
+
+        let conn = conn.clone();
+        let channels = handle.send(ConnectedChannels {
+            span: Span::current(),
+        });
+
+        Box::pin(async move {
+            Whois {
+                query: msg.query,
+                conn: Some(conn),
+                channels: channels.await.unwrap(),
+            }
+        })
     }
 }
 

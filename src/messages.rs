@@ -47,6 +47,13 @@ pub struct UserNickChange {
     pub span: Span,
 }
 
+/// List all the channels a user is connected to
+#[derive(Message, Clone)]
+#[rtype(result = "Vec<(crate::channel::permissions::Permission, String)>")]
+pub struct ConnectedChannels {
+    pub span: Span,
+}
+
 /// Fetches all the channels visible to the user.
 #[derive(Message, Clone)]
 #[rtype(result = "super::server::response::ChannelList")]
@@ -58,6 +65,14 @@ pub struct ChannelList {
 #[derive(Message, Clone)]
 #[rtype(result = "super::server::response::WhoList")]
 pub struct FetchWhoList {
+    pub span: Span,
+    pub query: String,
+}
+
+/// Fetches the WHOIS for the given query.
+#[derive(Message, Clone)]
+#[rtype(result = "super::server::response::Whois")]
+pub struct FetchWhois {
     pub span: Span,
     pub query: String,
 }
@@ -88,6 +103,14 @@ pub struct ChannelPart {
 #[rtype(result = "super::channel::response::ChannelNamesList")]
 pub struct ChannelMemberList {
     pub span: Span,
+}
+
+/// Retrieves the list of users currently in a channel.
+#[derive(Message)]
+#[rtype(result = "crate::channel::permissions::Permission")]
+pub struct FetchUserPermission {
+    pub span: Span,
+    pub user: UserId,
 }
 
 /// Retrieves the current channel topic.

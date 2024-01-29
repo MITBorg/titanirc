@@ -279,22 +279,10 @@ bitflags! {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
     pub struct UserMode: u32 {
-        /// a - user is flagged as away
-        const AWAY           = 0b0000_0000_0000_0000_0000_0000_0000_0001;
-        /// i - marks a users as invisible
-        const INVISIBLE      = 0b0000_0000_0000_0000_0000_0000_0000_0010;
         /// w - user receives wallops
-        const WALLOPS        = 0b0000_0000_0000_0000_0000_0000_0000_0100;
-        /// r - restricted user connection
-        const RESTRICTED     = 0b0000_0000_0000_0000_0000_0000_0000_1000;
+        const WALLOPS        = 0b0000_0000_0000_0000_0000_0000_0000_0001;
         /// o - operator flag
-        const OPER           = 0b0000_0000_0000_0000_0000_0000_0001_0000;
-        /// O - local operator flag
-        const LOCAL_OPER     = 0b0000_0000_0000_0000_0000_0000_0010_0000;
-        /// s - marks a user for receipt of server notices
-        const SERVER_NOTICES = 0b0000_0000_0000_0000_0000_0000_0100_0000;
-        /// x - masked hostname
-        const MASKED_HOST    = 0b0000_0000_0000_0000_0000_0000_1000_0000;
+        const OPER           = 0b0000_0000_0000_0000_0000_0000_0000_0010;
     }
 }
 

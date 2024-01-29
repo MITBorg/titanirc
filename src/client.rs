@@ -1,9 +1,9 @@
 use std::{collections::HashMap, time::Duration};
 
 use actix::{
-    fut::wrap_future, io::WriteHandler, Actor, ActorContext, ActorFuture, ActorFutureExt, Addr,
-    AsyncContext, Context, Handler, MessageResult, ResponseActFuture, ResponseFuture, Running,
-    StreamHandler, WrapFuture,
+    dev::ToEnvelope, fut::wrap_future, io::WriteHandler, Actor, ActorContext, ActorFuture,
+    ActorFutureExt, Addr, AsyncContext, Context, Handler, MessageResult, ResponseActFuture,
+    ResponseFuture, Running, StreamHandler, WrapFuture,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use clap::{crate_name, crate_version};
@@ -149,6 +149,52 @@ impl Client {
                     });
                 }
             })
+    }
+
+    fn channel_send_map_write<M>(
+        &self,
+        ctx: &mut Context<Self>,
+        channel: &Addr<Channel>,
+        message: M,
+        map: impl FnOnce(M::Result, &Self) -> Vec<Message> + 'static,
+    ) where
+        M: actix::Message + Send + 'static,
+        M::Result: Send,
+        Channel: Handler<M>,
+        <Channel as Actor>::Context: ToEnvelope<Channel, M>,
+    {
+        let fut = channel
+            .send(message)
+            .into_actor(self)
+            .map(move |result, ref mut this, _ctx| {
+                for message in (map)(result.unwrap(), this) {
+                    this.writer.write(message);
+                }
+            });
+        ctx.spawn(fut);
+    }
+
+    fn server_send_map_write<M>(
+        &self,
+        ctx: &mut Context<Self>,
+        message: M,
+        map: impl FnOnce(M::Result, &Self) -> Vec<Message> + 'static,
+    ) where
+        M: actix::Message + Send + 'static,
+        M::Result: Send,
+        Server: Handler<M>,
+        <Server as Actor>::Context: ToEnvelope<Server, M>,
+    {
+        let fut =
+            self.server
+                .send(message)
+                .into_actor(self)
+                .map(move |result, ref mut this, _ctx| {
+                    for message in (map)(result.unwrap(), this) {
+                        this.writer.write(message);
+                    }
+                });
+        ctx.spawn(fut);
     }
 }
 
@@ -646,19 +692,12 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     });
                 } else {
                     let span = Span::current();
-                    let fut = channel
-                        .send(ChannelFetchTopic { span })
-                        .into_actor(self)
-                        .map(|result, this, _ctx| {
-                            for message in result
-                                .unwrap()
-                                .into_messages(this.connection.nick.to_string(), false)
-                            {
-                                this.writer.write(message);
-                            }
-                        });
-
-                    ctx.spawn(fut);
+                    self.channel_send_map_write(
+                        ctx,
+                        channel,
+                        ChannelFetchTopic { span },
+                        |res, this| res.into_messages(this.connection.nick.to_string(), false),
+                    );
                 }
             }
             Command::NAMES(channel_names, _) => {
@@ -678,18 +717,9 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             }
             Command::LIST(_, _) => {
                 let span = Span::current();
-                let fut = self.server.send(ChannelList { span }).into_actor(self).map(
-                    |result, this, _ctx| {
-                        for message in result
-                            .unwrap()
-                            .into_messages(this.connection.nick.to_string())
-                        {
-                            this.writer.write(message);
-                        }
-                    },
-                );
-
-                ctx.spawn(fut);
+                self.server_send_map_write(ctx, ChannelList { span }, |res, this| {
+                    res.into_messages(this.connection.nick.to_string())
+                });
             }
             Command::INVITE(nick, channel) => {
                 let Some(channel) = self.channels.get(&channel) else {
@@ -747,33 +777,15 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             }
             Command::MOTD(_) => {
                 let span = Span::current();
-                let fut = self
-                    .server
-                    .send(ServerFetchMotd { span })
-                    .into_actor(self)
-                    .map(|result, this, _ctx| {
-                        for message in result
-                            .unwrap()
-                            .into_messages(this.connection.nick.to_string())
-                        {
-                            this.writer.write(message);
-                        }
-                    });
-
-                ctx.spawn(fut);
+                self.server_send_map_write(ctx, ServerFetchMotd { span }, |res, this| {
+                    res.into_messages(this.connection.nick.to_string())
+                });
             }
             Command::LUSERS(_, _) => {
                 let span = Span::current();
-                let fut = self
-                    .server
-                    .send(ServerListUsers { span })
-                    .into_actor(self)
-                    .map(|result, this, _ctx| {
-                        for message in result.unwrap().into_messages(&this.connection.nick) {
-                            this.writer.write(message);
-                        }
-                    });
-                ctx.spawn(fut);
+                self.server_send_map_write(ctx, ServerListUsers { span }, |res, this| {
+                    res.into_messages(&this.connection.nick)
+                });
             }
             Command::VERSION(_) => {
                 self.writer.write(Message {
@@ -808,16 +820,9 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             }
             Command::ADMIN(_) => {
                 let span = Span::current();
-                let fut = self
-                    .server
-                    .send(ServerAdminInfo { span })
-                    .into_actor(self)
-                    .map(|result, this, _ctx| {
-                        for message in result.unwrap().into_messages(&this.connection.nick) {
-                            this.writer.write(message);
-                        }
-                    });
-                ctx.spawn(fut);
+                self.server_send_map_write(ctx, ServerAdminInfo { span }, |res, this| {
+                    res.into_messages(&this.connection.nick)
+                });
             }
             Command::INFO(_) => {
                 static INFO_STR: &str = include_str!("../text/info.txt");
@@ -844,31 +849,17 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     ),
                 });
             }
-            Command::WHO(Some(mask), _) => {
+            Command::WHO(Some(query), _) => {
                 let span = Span::current();
-                let fut = self
-                    .server
-                    .send(FetchWhoList { span, query: mask })
-                    .into_actor(self)
-                    .map(|result, this, _ctx| {
-                        for message in result.unwrap().into_messages(&this.connection.nick) {
-                            this.writer.write(message);
-                        }
-                    });
-                ctx.spawn(fut);
+                self.server_send_map_write(ctx, FetchWhoList { span, query }, |res, this| {
+                    res.into_messages(&this.connection.nick)
+                });
             }
             Command::WHOIS(Some(query), _) => {
                 let span = Span::current();
-                let fut = self
-                    .server
-                    .send(FetchWhois { span, query })
-                    .into_actor(self)
-                    .map(|result, this, _ctx| {
-                        for message in result.unwrap().into_messages(&this.connection.nick) {
-                            this.writer.write(message);
-                        }
-                    });
-                ctx.spawn(fut);
+                self.server_send_map_write(ctx, FetchWhois { span, query }, |res, this| {
+                    res.into_messages(&this.connection.nick)
+                });
             }
             Command::WHOWAS(_, _, _) => {}
             Command::KILL(_, _) => {}

@@ -245,7 +245,11 @@ impl Handler<SetUserMode> for Channel {
         let permissions = self.get_user_permissions(msg.requester.user_id);
 
         // TODO: this should allow setting perms not currently in the channel
-        let Some((_, affected_user)) = self.clients.iter().find(|(_, connection)| connection.nick == msg.affected_nick) else {
+        let Some((_, affected_user)) = self
+            .clients
+            .iter()
+            .find(|(_, connection)| connection.nick == msg.affected_nick)
+        else {
             error!("Unknown user to set perms on");
             return;
         };
@@ -290,7 +294,10 @@ impl Handler<SetUserMode> for Channel {
             .values()
             .filter(|connection| connection.user_id == affected_user.user_id);
         for connection in all_connected_for_user_id {
-            let Some(mode) = msg.user_mode.into_mode(msg.add, connection.nick.to_string()) else {
+            let Some(mode) = msg
+                .user_mode
+                .into_mode(msg.add, connection.nick.to_string())
+            else {
                 continue;
             };
 

@@ -2,6 +2,77 @@ use irc_proto::{Command, Message, Prefix, Response};
 
 use crate::{server::Server, SERVER_NAME};
 
+pub struct ListUsers {
+    pub current_clients: usize,
+    pub max_clients: usize,
+    pub operators_online: usize,
+    pub channels_formed: usize,
+}
+
+impl ListUsers {
+    #[must_use]
+    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+        macro_rules! msg {
+            ($response:ident, $($payload:expr),*) => {
+
+                Message {
+                    tags: None,
+                    prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                    command: Command::Response(
+                        Response::$response,
+                        vec![for_user.to_string(), $($payload),*],
+                    ),
+                }
+            };
+        }
+
+        vec![
+            msg!(
+                RPL_LUSERCLIENT,
+                format!(
+                    "There are {} users and 0 invisible on 1 servers",
+                    self.current_clients
+                )
+            ),
+            msg!(
+                RPL_LUSEROP,
+                "0".to_string(),
+                "operator(s) online".to_string()
+            ),
+            msg!(
+                RPL_LUSERCHANNELS,
+                self.channels_formed.to_string(),
+                "channels formed".to_string()
+            ),
+            msg!(
+                RPL_LUSERME,
+                format!(
+                    "I have {} clients and 1 servers",
+                    self.current_clients.to_string()
+                )
+            ),
+            msg!(
+                RPL_LOCALUSERS,
+                self.current_clients.to_string(),
+                self.max_clients.to_string(),
+                format!(
+                    "Current local users {}, max {}",
+                    self.current_clients, self.max_clients
+                )
+            ),
+            msg!(
+                RPL_GLOBALUSERS,
+                self.current_clients.to_string(),
+                self.max_clients.to_string(),
+                format!(
+                    "Current global users {}, max {}",
+                    self.current_clients, self.max_clients
+                )
+            ),
+        ]
+    }
+}
+
 #[derive(Default)]
 pub struct Motd {
     pub motd: Option<String>,

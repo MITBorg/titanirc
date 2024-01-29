@@ -54,7 +54,9 @@ impl Handler<AuthenticateMessage> for Authenticate {
                 Err(_) => SaslStrategyUnsupported::into_message(),
             };
 
-            return Box::pin(futures::future::ok(AuthenticateResult::Reply(Box::new(message))));
+            return Box::pin(futures::future::ok(AuthenticateResult::Reply(Box::new(
+                message,
+            ))));
         };
 
         // user has cancelled authentication
@@ -96,7 +98,9 @@ pub async fn handle_plain_authentication(
 
     // split the PLAIN message into its respective parts
     let mut message = arguments.splitn(3, |f| *f == b'\0');
-    let (Some(authorization_identity), Some(authentication_identity), Some(password)) = (message.next(), message.next(), message.next()) else {
+    let (Some(authorization_identity), Some(authentication_identity), Some(password)) =
+        (message.next(), message.next(), message.next())
+    else {
         return Err(Error::new(ErrorKind::InvalidData, "bad plain message"));
     };
 

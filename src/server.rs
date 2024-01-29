@@ -22,10 +22,10 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
         FetchClientByNick, MessageKind, PrivateMessage, ServerDisconnect, ServerFetchMotd,
-        UserConnected, UserNickChange, UserNickChangeInternal,
+        ServerListUsers, UserConnected, UserNickChange, UserNickChangeInternal,
     },
     persistence::Persistence,
-    server::response::Motd,
+    server::response::{ListUsers, Motd},
     SERVER_NAME,
 };
 
@@ -34,6 +34,7 @@ pub struct Server {
     pub channel_arbiters: Vec<Arbiter>,
     pub channels: HashMap<String, Addr<Channel>>,
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
+    pub max_clients: usize,
     pub config: Config,
     pub persistence: Addr<Persistence>,
 }
@@ -125,6 +126,7 @@ impl Handler<UserConnected> for Server {
         }
 
         self.clients.insert(msg.handle, msg.connection);
+        self.max_clients = self.clients.len().max(self.max_clients);
     }
 }
 
@@ -258,6 +260,19 @@ impl Handler<ChannelList> for Server {
             });
 
         Box::pin(fut)
+    }
+}
+
+impl Handler<ServerListUsers> for Server {
+    type Result = MessageResult<ServerListUsers>;
+
+    fn handle(&mut self, _msg: ServerListUsers, _ctx: &mut Self::Context) -> Self::Result {
+        MessageResult(ListUsers {
+            current_clients: self.clients.len(),
+            max_clients: self.max_clients,
+            operators_online: 0,
+            channels_formed: self.channels.len(),
+        })
     }
 }
 

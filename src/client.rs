@@ -1,8 +1,9 @@
 use std::{collections::HashMap, time::Duration};
 
 use actix::{
-    fut::wrap_future, io::WriteHandler, Actor, ActorContext, ActorFutureExt, Addr, AsyncContext,
-    Context, Handler, MessageResult, ResponseActFuture, Running, StreamHandler, WrapFuture,
+    fut::wrap_future, io::WriteHandler, Actor, ActorContext, ActorFuture, ActorFutureExt, Addr,
+    AsyncContext, Context, Handler, MessageResult, ResponseActFuture, Running, StreamHandler,
+    WrapFuture,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use clap::{crate_name, crate_version};
@@ -11,7 +12,7 @@ use irc_proto::{
     error::ProtocolError, message::Tag, ChannelExt, Command, Message, Prefix, Response,
 };
 use tokio::time::Instant;
-use tracing::{debug, error, info, info_span, instrument, warn, Instrument, Span};
+use tracing::{debug, error, info, instrument, warn, Instrument, Span};
 
 use crate::{
     channel::Channel,
@@ -23,7 +24,7 @@ use crate::{
         Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
         ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
         FetchClientDetails, MessageKind, PrivateMessage, ServerDisconnect, ServerFetchMotd,
-        UserKickedFromChannel, UserNickChange, UserNickChangeInternal,
+        ServerListUsers, UserKickedFromChannel, UserNickChange, UserNickChangeInternal,
     },
     persistence::{
         events::{
@@ -79,6 +80,74 @@ impl Client {
             Some(time.to_rfc3339_opts(SecondsFormat::Millis, true)),
         ))
     }
+
+    /// Send scheduled pings to the client
+    #[instrument(parent = &self.span, skip_all)]
+    fn handle_ping_interval(&mut self, ctx: &mut Context<Self>) {
+        if Instant::now().duration_since(self.last_active) >= Duration::from_secs(120) {
+            self.server_leave_reason = Some("Ping timeout: 120 seconds".to_string());
+            ctx.stop();
+        }
+
+        self.writer.write(Message {
+            tags: None,
+            prefix: None,
+            command: Command::PING(SERVER_NAME.to_string(), None),
+        });
+    }
+
+    //// Join the user to all the channels they were previously in before disconnecting from
+    //// the server
+    fn rejoin_channels(&self) -> impl ActorFuture<Self, Output = ()> + 'static {
+        self.persistence
+            .send(FetchUserChannels {
+                user_id: self.connection.user_id,
+                span: Span::current(),
+            })
+            .into_actor(self)
+            .map(move |res, this, ctx| {
+                ctx.notify(JoinChannelRequest {
+                    channels: res.unwrap(),
+                    span: this.span.clone(),
+                });
+            })
+    }
+
+    fn build_unseen_message(
+        &self,
+        sent: DateTime<Utc>,
+        sender: &str,
+        message: String,
+        kind: MessageKind,
+    ) -> Message {
+        Message {
+            tags: TagBuilder::default()
+                .insert(self.maybe_build_time_tag(sent))
+                .into(),
+            prefix: Some(Prefix::new_from_str(sender)),
+            command: match kind {
+                MessageKind::Normal => Command::PRIVMSG(self.connection.nick.clone(), message),
+                MessageKind::Notice => Command::NOTICE(self.connection.nick.clone(), message),
+            },
+        }
+    }
+
+    fn send_unseen_private_messages(&self) -> impl ActorFuture<Self, Output = ()> + 'static {
+        self.persistence
+            .send(FetchUnseenPrivateMessages {
+                user_id: self.connection.user_id,
+                span: Span::current(),
+            })
+            .into_actor(self)
+            .map(move |res, this, ctx| {
+                for (sent, sender, message, kind) in res.unwrap() {
+                    ctx.notify(Broadcast {
+                        message: this.build_unseen_message(sent, &sender, message, kind),
+                        span: this.span.clone(),
+                    });
+                }
+            })
+    }
 }
 
 impl Actor for Client {
@@ -91,68 +160,9 @@ impl Actor for Client {
     fn started(&mut self, ctx: &mut Self::Context) {
         info!(?self.connection, "Client has successfully joined to server");
 
-        // schedule pings to the client
-        ctx.run_interval(Duration::from_secs(30), |this, ctx| {
-            let _span = info_span!(parent: &this.span, "ping").entered();
-
-            if Instant::now().duration_since(this.last_active) >= Duration::from_secs(120) {
-                this.server_leave_reason = Some("Ping timeout: 120 seconds".to_string());
-                ctx.stop();
-            }
-
-            this.writer.write(Message {
-                tags: None,
-                prefix: None,
-                command: Command::PING(SERVER_NAME.to_string(), None),
-            });
-        });
-
-        // join the user to all the channels they were previously in before disconnecting from
-        // the server
-        ctx.spawn(
-            self.persistence
-                .send(FetchUserChannels {
-                    user_id: self.connection.user_id,
-                    span: Span::current(),
-                })
-                .into_actor(self)
-                .map(move |res, this, ctx| {
-                    ctx.notify(JoinChannelRequest {
-                        channels: res.unwrap(),
-                        span: this.span.clone(),
-                    });
-                }),
-        );
-
-        ctx.spawn(
-            self.persistence
-                .send(FetchUnseenPrivateMessages {
-                    user_id: self.connection.user_id,
-                    span: Span::current(),
-                })
-                .into_actor(self)
-                .map(move |res, this, ctx| {
-                    for (sent, sender, message, kind) in res.unwrap() {
-                        ctx.notify(Broadcast {
-                            message: Message {
-                                tags: TagBuilder::default()
-                                    .insert(this.maybe_build_time_tag(sent))
-                                    .into(),
-                                prefix: Some(Prefix::new_from_str(&sender)),
-                                command: match kind {
-                                    MessageKind::Normal => {
-                                        Command::PRIVMSG(this.connection.nick.clone(), message)
-                                    }
-                                    MessageKind::Notice => {
-                                        Command::NOTICE(this.connection.nick.clone(), message)
-                                    }
-                                },
-                            },
-                            span: this.span.clone(),
-                        });
-                    }
-                }),
-        );
+        ctx.run_interval(Duration::from_secs(30), Self::handle_ping_interval);
+        ctx.spawn(self.rejoin_channels());
+        ctx.spawn(self.send_unseen_private_messages());
     }
 
     /// Called when the actor is shutting down, either gracefully by the client or forcefully
@@ -652,7 +662,19 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
 
                 ctx.spawn(fut);
             }
-            Command::LUSERS(_, _) => {}
+            Command::LUSERS(_, _) => {
+                let span = Span::current();
+                let fut = self
+                    .server
+                    .send(ServerListUsers { span })
+                    .into_actor(self)
+                    .map(|result, this, _ctx| {
+                        for message in result.unwrap().into_messages(&this.connection.nick) {
+                            this.writer.write(message);
+                        }
+                    });
+                ctx.spawn(fut);
+            }
             Command::VERSION(_) => {
                 self.writer.write(Message {
                     tags: None,

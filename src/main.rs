@@ -98,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
         channel_arbiters: build_arbiters(opts.config.channel_threads),
         config: opts.config,
         persistence,
+        max_clients: 0,
     });
 
     let listener = TcpListener::bind(listen_address).await?;

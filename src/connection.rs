@@ -1,3 +1,5 @@
+#![allow(clippy::iter_without_into_iter)]
+
 mod authenticate;
 pub mod sasl;
 
@@ -81,7 +83,8 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
             real_name: Some(real_name),
             user_id: Some(user_id),
             capabilities,
-        } = value else {
+        } = value
+        else {
             return Err(value);
         };
 

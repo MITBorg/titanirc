@@ -115,6 +115,13 @@ pub struct ServerFetchMotd {
     pub span: Span,
 }
 
+/// Returns the result of `LUSERS`.
+#[derive(Message)]
+#[rtype(result = "super::server::response::ListUsers")]
+pub struct ServerListUsers {
+    pub span: Span,
+}
+
 /// Sent from channels to users when a user is removed from the channel.
 #[derive(Message)]
 #[rtype(result = "()")]

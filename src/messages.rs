@@ -47,6 +47,13 @@ pub struct UserNickChange {
     pub span: Span,
 }
 
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct Wallops {
+    pub message: String,
+    pub span: Span,
+}
+
 /// List all the channels a user is connected to
 #[derive(Message, Clone)]
 #[rtype(result = "Vec<(crate::channel::permissions::Permission, String)>")]

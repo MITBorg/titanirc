@@ -44,7 +44,6 @@ pub struct ConnectionRequest {
     host: Option<SocketAddr>,
     nick: Option<String>,
     user: Option<String>,
-    mode: Option<String>,
     real_name: Option<String>,
     user_id: Option<UserId>,
     capabilities: Capability,
@@ -55,7 +54,7 @@ pub struct InitiatedConnection {
     pub host: SocketAddr,
     pub nick: String,
     pub user: String,
-    pub mode: String,
+    pub mode: UserMode,
     pub real_name: String,
     pub user_id: UserId,
     pub capabilities: Capability,
@@ -82,7 +81,6 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
             host: Some(host),
             nick: Some(nick),
             user: Some(user),
-            mode: Some(mode),
             real_name: Some(real_name),
             user_id: Some(user_id),
             capabilities,
@@ -95,7 +93,7 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
             host,
             nick,
             user,
-            mode,
+            mode: UserMode::empty(),
             real_name,
             user_id,
             capabilities,
@@ -138,9 +136,8 @@ pub async fn negotiate_client_connection(
         match msg.command {
             Command::PASS(_) => {}
             Command::NICK(nick) => request.nick = Some(nick),
-            Command::USER(_user, mode, real_name) => {
+            Command::USER(_user, _mode, real_name) => {
                 // we ignore the user here, as it will be set by the AUTHENTICATE command
-                request.mode = Some(mode);
                 request.real_name = Some(real_name);
             }
             Command::CAP(_, CapSubCommand::LIST | CapSubCommand::LS, _, _) => {
@@ -278,6 +275,26 @@ bitflags! {
     pub struct Capability: u32 {
         const USERHOST_IN_NAMES = 0b0000_0000_0000_0000_0000_0000_0000_0001;
         const SERVER_TIME       = 0b0000_0000_0000_0000_0000_0000_0000_0010;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+    pub struct UserMode: u32 {
+        /// a - user is flagged as away
+        const AWAY           = 0b0000_0000_0000_0000_0000_0000_0000_0001;
+        /// i - marks a users as invisible
+        const INVISIBLE      = 0b0000_0000_0000_0000_0000_0000_0000_0010;
+        /// w - user receives wallops
+        const WALLOPS        = 0b0000_0000_0000_0000_0000_0000_0000_0100;
+        /// r - restricted user connection
+        const RESTRICTED     = 0b0000_0000_0000_0000_0000_0000_0000_1000;
+        /// o - operator flag
+        const OPER           = 0b0000_0000_0000_0000_0000_0000_0001_0000;
+        /// O - local operator flag
+        const LOCAL_OPER     = 0b0000_0000_0000_0000_0000_0000_0010_0000;
+        /// s - marks a user for receipt of server notices
+        const SERVER_NOTICES = 0b0000_0000_0000_0000_0000_0000_0100_0000;
+        /// x - masked hostname
+        const MASKED_HOST    = 0b0000_0000_0000_0000_0000_0000_1000_0000;
     }
 }
 

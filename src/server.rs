@@ -22,12 +22,13 @@ use crate::{
     channel::{permissions::Permission, Channel, ChannelId},
     client::Client,
     config::Config,
-    connection::InitiatedConnection,
+    connection::{InitiatedConnection, UserMode},
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelJoin, ChannelList,
         ChannelMemberList, ClientAway, ConnectedChannels, FetchClientByNick, FetchWhoList,
         FetchWhois, MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect,
         ServerFetchMotd, ServerListUsers, UserConnected, UserNickChange, UserNickChangeInternal,
+        Wallops,
     },
     persistence::Persistence,
     server::response::{AdminInfo, ListUsers, Motd, WhoList, Whois},
@@ -132,6 +133,28 @@ impl Handler<UserConnected> for Server {
 
         self.clients.insert(msg.handle, msg.connection);
         self.max_clients = self.clients.len().max(self.max_clients);
+    }
+}
+
+impl Handler<Wallops> for Server {
+    type Result = ();
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: Wallops, _ctx: &mut Self::Context) -> Self::Result {
+        for (handle, conn) in &self.clients {
+            if !conn.mode.contains(UserMode::WALLOPS) {
+                continue;
+            }
+
+            handle.do_send(Broadcast {
+                message: Message {
+                    tags: None,
+                    prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                    command: Command::WALLOPS(msg.message.clone()),
+                },
+                span: msg.span.clone(),
+            });
+        }
     }
 }
 

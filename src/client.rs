@@ -18,7 +18,7 @@ use crate::{
     channel::Channel,
     connection::{
         sasl::SaslAlreadyAuthenticated, Capability, InitiatedConnection, MessageSink,
-        NickNotOwnedByUser,
+        NickNotOwnedByUser, UserMode,
     },
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
@@ -26,7 +26,7 @@ use crate::{
         ChannelSetMode, ChannelUpdateTopic, ClientAway, ConnectedChannels, FetchClientDetails,
         FetchUserPermission, FetchWhoList, FetchWhois, MessageKind, PrivateMessage,
         ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers, UserKickedFromChannel,
-        UserNickChange, UserNickChangeInternal,
+        UserNickChange, UserNickChangeInternal, Wallops,
     },
     persistence::{
         events::{
@@ -624,9 +624,6 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
         // https://modern.ircdocs.horse/
         #[allow(clippy::match_same_arms)]
         match item.command {
-            Command::USER(_, _, _) | Command::PASS(_) | Command::CAP(_, _, _, _) => {
-                // these were already handled by `negotiate_client_connection`
-            }
             Command::NICK(new_nick) => {
                 ctx.notify(UserNickChangeInternal {
                     old_nick: self.connection.nick.to_string(),
@@ -883,7 +880,12 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::DIE => {}
             Command::RESTART => {}
             Command::USERS(_) => {}
-            Command::WALLOPS(_) => {}
+            Command::WALLOPS(message) if self.connection.mode.contains(UserMode::OPER) => {
+                self.server.do_send(Wallops {
+                    span: Span::current(),
+                    message,
+                });
+            }
             Command::USERHOST(_) => {}
             Command::SAJOIN(_, _) => {}
             Command::SAMODE(_, _, _) => {}

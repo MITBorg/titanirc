@@ -2,6 +2,38 @@ use irc_proto::{Command, Message, Prefix, Response};
 
 use crate::{server::Server, SERVER_NAME};
 
+#[derive(Default)]
+pub struct WhoList {
+    pub list: Vec<crate::channel::response::ChannelWhoList>,
+    pub query: String,
+}
+
+impl WhoList {
+    #[must_use]
+    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+        let mut out: Vec<_> = self
+            .list
+            .into_iter()
+            .flat_map(|v| v.into_messages(for_user))
+            .collect();
+
+        out.push(Message {
+            tags: None,
+            prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+            command: Command::Response(
+                Response::RPL_ENDOFWHO,
+                vec![
+                    for_user.to_string(),
+                    self.query,
+                    "End of WHO list".to_string(),
+                ],
+            ),
+        });
+
+        out
+    }
+}
+
 pub struct AdminInfo {
     pub line1: String,
     pub line2: String,

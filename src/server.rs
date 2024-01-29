@@ -8,7 +8,10 @@ use actix::{
 };
 use actix_rt::Arbiter;
 use clap::crate_version;
-use futures::{stream::FuturesOrdered, TryFutureExt};
+use futures::{
+    stream::{FuturesOrdered, FuturesUnordered},
+    TryFutureExt,
+};
 use irc_proto::{Command, Message, Prefix, Response};
 use rand::seq::SliceRandom;
 use tokio_stream::StreamExt;
@@ -20,12 +23,13 @@ use crate::{
     config::Config,
     connection::InitiatedConnection,
     messages::{
-        Broadcast, ChannelFetchTopic, ChannelJoin, ChannelList, ChannelMemberList,
-        FetchClientByNick, MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect,
-        ServerFetchMotd, ServerListUsers, UserConnected, UserNickChange, UserNickChangeInternal,
+        Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelJoin, ChannelList,
+        ChannelMemberList, FetchClientByNick, FetchWhoList, MessageKind, PrivateMessage,
+        ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers, UserConnected,
+        UserNickChange, UserNickChangeInternal,
     },
     persistence::Persistence,
-    server::response::{AdminInfo, ListUsers, Motd},
+    server::response::{AdminInfo, ListUsers, Motd, WhoList},
     SERVER_NAME,
 };
 
@@ -222,6 +226,46 @@ impl Handler<FetchClientByNick> for Server {
                 .find(|(_handle, connection)| connection.nick == msg.nick)
                 .map(|v| v.0.clone()),
         )
+    }
+}
+
+impl Handler<FetchWhoList> for Server {
+    type Result = ResponseFuture<<FetchWhoList as actix::Message>::Result>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: FetchWhoList, _ctx: &mut Self::Context) -> Self::Result {
+        if let Some(channel) = self.channels.get(&msg.query).cloned() {
+            Box::pin(async move {
+                WhoList {
+                    list: vec![channel
+                        .send(ChannelFetchWhoList { span: msg.span })
+                        .await
+                        .unwrap()],
+                    query: msg.query,
+                }
+            })
+        } else {
+            let futures = self
+                .clients
+                .iter()
+                .filter(|(_, conn)| conn.nick == msg.query)
+                .map(|(client, _)| {
+                    client.send(FetchWhoList {
+                        span: msg.span.clone(),
+                        query: String::new(),
+                    })
+                })
+                .collect::<FuturesUnordered<_>>();
+
+            let init = WhoList {
+                query: msg.query,
+                list: Vec::new(),
+            };
+            Box::pin(futures.fold(init, |mut acc, item| {
+                acc.list.extend(item.unwrap().list);
+                acc
+            }))
+        }
     }
 }
 

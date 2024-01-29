@@ -58,6 +58,7 @@ pub struct InitiatedConnection {
     pub real_name: String,
     pub user_id: UserId,
     pub capabilities: Capability,
+    pub presence: bool,
 }
 
 impl InitiatedConnection {
@@ -96,6 +97,7 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
             real_name,
             user_id,
             capabilities,
+            presence: true,
         })
     }
 }

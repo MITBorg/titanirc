@@ -2,12 +2,12 @@ use std::{collections::HashMap, time::Duration};
 
 use actix::{
     fut::wrap_future, io::WriteHandler, Actor, ActorContext, ActorFuture, ActorFutureExt, Addr,
-    AsyncContext, Context, Handler, MessageResult, ResponseActFuture, Running, StreamHandler,
-    WrapFuture,
+    AsyncContext, Context, Handler, MessageResult, ResponseActFuture, ResponseFuture, Running,
+    StreamHandler, WrapFuture,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use clap::{crate_name, crate_version};
-use futures::FutureExt;
+use futures::{future, stream::FuturesUnordered, FutureExt, StreamExt};
 use irc_proto::{
     error::ProtocolError, message::Tag, ChannelExt, Command, Message, Prefix, Response,
 };
@@ -21,11 +21,11 @@ use crate::{
         NickNotOwnedByUser,
     },
     messages::{
-        Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser, ChannelList,
-        ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
-        FetchClientDetails, MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect,
-        ServerFetchMotd, ServerListUsers, UserKickedFromChannel, UserNickChange,
-        UserNickChangeInternal,
+        Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
+        ChannelKickUser, ChannelList, ChannelMemberList, ChannelMessage, ChannelPart,
+        ChannelSetMode, ChannelUpdateTopic, FetchClientDetails, FetchWhoList, MessageKind,
+        PrivateMessage, ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers,
+        UserKickedFromChannel, UserNickChange, UserNickChangeInternal,
     },
     persistence::{
         events::{
@@ -34,7 +34,7 @@ use crate::{
         },
         Persistence,
     },
-    server::Server,
+    server::{response::WhoList, Server},
     SERVER_NAME,
 };
 
@@ -215,6 +215,31 @@ impl Handler<Broadcast> for Client {
     }
 }
 
+/// Retrieves the entire WHO list for the user.
+impl Handler<FetchWhoList> for Client {
+    type Result = ResponseFuture<<FetchWhoList as actix::Message>::Result>;
+
+    fn handle(&mut self, msg: FetchWhoList, _ctx: &mut Self::Context) -> Self::Result {
+        let user_id = self.connection.user_id;
+
+        let futures = self
+            .channels
+            .values()
+            .map(|v| {
+                v.send(ChannelFetchWhoList {
+                    span: msg.span.clone(),
+                })
+            })
+            .collect::<FuturesUnordered<_>>();
+        Box::pin(futures.fold(WhoList::default(), move |mut acc, item| {
+            let mut item = item.unwrap();
+            item.nick_list.retain(|(_, conn)| conn.user_id == user_id);
+            acc.list.push(item);
+            future::ready(acc)
+        }))
+    }
+}
+
 /// Returns the client's current nick/connection info.
 impl Handler<FetchClientDetails> for Client {
     type Result = MessageResult<FetchClientDetails>;
@@ -258,19 +283,17 @@ impl Handler<JoinChannelRequest> for Client {
                 span: Span::current(),
             });
 
-            futures.push(
-                futures::future::join(channel_handle_fut, channel_messages_fut).map(
-                    move |(handle, messages)| {
-                        (channel_name, handle.unwrap().unwrap(), messages.unwrap())
-                    },
-                ),
-            );
+            futures.push(future::join(channel_handle_fut, channel_messages_fut).map(
+                move |(handle, messages)| {
+                    (channel_name, handle.unwrap().unwrap(), messages.unwrap())
+                },
+            ));
         }
 
         // await on all the `ChannelJoin` events to the server, and once we get the channel
         // handles back write them to the server
         let fut = wrap_future::<_, Self>(
-            futures::future::join_all(futures.into_iter()).instrument(Span::current()),
+            future::join_all(futures.into_iter()).instrument(Span::current()),
         )
         .map(|result, this, _ctx| {
             for (channel_name, handle, messages) in result {
@@ -327,7 +350,7 @@ impl Handler<ListChannelMemberRequest> for Client {
         // await on all the `ChannelMemberList` events to the channels, and once we get the lists back
         // write them to the client
         let fut = wrap_future::<_, Self>(
-            futures::future::join_all(futures.into_iter()).instrument(Span::current()),
+            future::join_all(futures.into_iter()).instrument(Span::current()),
         )
         .map(|result, this, _ctx| {
             for list in result {
@@ -488,7 +511,9 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     span: Span::current(),
                 });
             }
-            Command::UserMODE(_, _) => {}
+            Command::UserMODE(_, _) => {
+                // TODO
+            }
             Command::QUIT(message) => {
                 // set the user's leave reason and request a shutdown of the actor to close the
                 // connection
@@ -717,10 +742,44 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     });
                 ctx.spawn(fut);
             }
-            Command::INFO(_) => {}
-            Command::SERVLIST(_, _) => {}
-            Command::SQUERY(_, _) => {}
-            Command::WHO(_, _) => {}
+            Command::INFO(_) => {
+                static INFO_STR: &str = include_str!("../text/info.txt");
+                for line in INFO_STR.trim().split('\n') {
+                    self.writer.write(Message {
+                        tags: None,
+                        prefix: None,
+                        command: Command::Response(
+                            Response::RPL_INFO,
+                            vec![self.connection.nick.to_string(), line.to_string()],
+                        ),
+                    });
+                }
+
+                self.writer.write(Message {
+                    tags: None,
+                    prefix: None,
+                    command: Command::Response(
+                        Response::RPL_ENDOFINFO,
+                        vec![
+                            self.connection.nick.to_string(),
+                            "End of INFO list".to_string(),
+                        ],
+                    ),
+                });
+            }
+            Command::WHO(Some(mask), _) => {
+                let span = Span::current();
+                let fut = self
+                    .server
+                    .send(FetchWhoList { span, query: mask })
+                    .into_actor(self)
+                    .map(|result, this, _ctx| {
+                        for message in result.unwrap().into_messages(&this.connection.nick) {
+                            this.writer.write(message);
+                        }
+                    });
+                ctx.spawn(fut);
+            }
             Command::WHOIS(_, _) => {}
             Command::WHOWAS(_, _, _) => {}
             Command::KILL(_, _) => {}
@@ -770,7 +829,7 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::BATCH(_, _, _) => {}
             Command::CHGHOST(_, _) => {}
             Command::Response(_, _) => {}
-            v @ _ => self.writer.write(Message {
+            v => self.writer.write(Message {
                 tags: None,
                 prefix: Some(Prefix::new_from_str(&self.connection.nick)),
                 command: Command::Response(

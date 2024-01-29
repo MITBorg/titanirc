@@ -54,6 +54,14 @@ pub struct ChannelList {
     pub span: Span,
 }
 
+/// Fetches the WHO list for the given query.
+#[derive(Message, Clone)]
+#[rtype(result = "super::server::response::WhoList")]
+pub struct FetchWhoList {
+    pub span: Span,
+    pub query: String,
+}
+
 /// Sent when the user attempts to join a channel.
 #[derive(Message)]
 #[rtype(
@@ -86,6 +94,13 @@ pub struct ChannelMemberList {
 #[derive(Message)]
 #[rtype(result = "super::channel::response::ChannelTopic")]
 pub struct ChannelFetchTopic {
+    pub span: Span,
+}
+
+/// Retrieves the WHO list for the channel.
+#[derive(Message)]
+#[rtype(result = "super::channel::response::ChannelWhoList")]
+pub struct ChannelFetchWhoList {
     pub span: Span,
 }
 

@@ -17,15 +17,16 @@ use crate::{
         permissions::Permission,
         response::{
             ChannelInviteResult, ChannelJoinRejectionReason, ChannelNamesList, ChannelTopic,
-            MissingPrivileges,
+            ChannelWhoList, MissingPrivileges,
         },
     },
     client::Client,
     connection::{Capability, InitiatedConnection, UserId},
     messages::{
-        Broadcast, ChannelFetchTopic, ChannelInvite, ChannelJoin, ChannelKickUser,
-        ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode, ChannelUpdateTopic,
-        FetchClientByNick, MessageKind, ServerDisconnect, UserKickedFromChannel, UserNickChange,
+        Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
+        ChannelKickUser, ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode,
+        ChannelUpdateTopic, FetchClientByNick, MessageKind, ServerDisconnect,
+        UserKickedFromChannel, UserNickChange,
     },
     persistence::{
         events::{FetchAllUserChannelPermissions, SetUserChannelPermissions},
@@ -193,6 +194,15 @@ impl Handler<ChannelMessage> for Channel {
                 },
             });
         }
+    }
+}
+
+impl Handler<ChannelFetchWhoList> for Channel {
+    type Result = MessageResult<ChannelFetchWhoList>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ChannelFetchWhoList, _ctx: &mut Self::Context) -> Self::Result {
+        MessageResult(ChannelWhoList::new(self))
     }
 }
 

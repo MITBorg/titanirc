@@ -66,6 +66,55 @@ impl ChannelTopic {
     }
 }
 
+pub struct ChannelWhoList {
+    pub channel_name: String,
+    pub nick_list: Vec<(Permission, InitiatedConnection)>,
+}
+
+impl ChannelWhoList {
+    #[must_use]
+    pub fn new(channel: &Channel) -> Self {
+        Self {
+            channel_name: channel.name.to_string(),
+            nick_list: channel
+                .clients
+                .values()
+                .map(|v| (channel.get_user_permissions(v.user_id), v.clone()))
+                .collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+        let mut out = Vec::with_capacity(self.nick_list.len());
+
+        for (perm, conn) in self.nick_list {
+            let presence = if conn.presence { "H" } else { "G" };
+
+            out.push(Message {
+                tags: None,
+                prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                command: Command::Response(
+                    Response::RPL_WHOREPLY,
+                    vec![
+                        for_user.to_string(),
+                        self.channel_name.to_string(),
+                        conn.user,
+                        conn.host.to_string(),
+                        SERVER_NAME.to_string(),
+                        conn.nick,
+                        format!("{presence}{}", perm.into_prefix()), // TODO: user modes & server operator
+                        "0".to_string(),
+                        conn.real_name,
+                    ],
+                ),
+            });
+        }
+
+        out
+    }
+}
+
 pub struct ChannelNamesList {
     pub channel_name: String,
     pub nick_list: Vec<(Permission, InitiatedConnection)>,

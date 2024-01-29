@@ -689,8 +689,6 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     ),
                 });
             }
-            Command::STATS(_, _) => {}
-            Command::LINKS(_, _) => {}
             Command::TIME(_) => {
                 let time = chrono::Utc::now();
 
@@ -708,8 +706,6 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     ),
                 });
             }
-            Command::CONNECT(_, _, _) => {}
-            Command::TRACE(_) => {}
             Command::ADMIN(_) => {}
             Command::INFO(_) => {}
             Command::SERVLIST(_, _) => {}
@@ -728,16 +724,13 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::PONG(_, _) => {
                 self.last_active = Instant::now();
             }
-            Command::ERROR(_) => {}
             Command::AWAY(_) => {}
             Command::REHASH => {}
             Command::DIE => {}
             Command::RESTART => {}
-            Command::SUMMON(_, _, _) => {}
             Command::USERS(_) => {}
             Command::WALLOPS(_) => {}
             Command::USERHOST(_) => {}
-            Command::ISON(_) => {}
             Command::SAJOIN(_, _) => {}
             Command::SAMODE(_, _, _) => {}
             Command::SANICK(old_nick, new_nick) => {
@@ -767,7 +760,21 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::BATCH(_, _, _) => {}
             Command::CHGHOST(_, _) => {}
             Command::Response(_, _) => {}
-            Command::Raw(_, _) => {}
+            v @ _ => self.writer.write(Message {
+                tags: None,
+                prefix: Some(Prefix::new_from_str(&self.connection.nick)),
+                command: Command::Response(
+                    Response::ERR_UNKNOWNCOMMAND,
+                    vec![
+                        String::from(&v)
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or_default()
+                            .to_string(),
+                        "Unknown command".to_string(),
+                    ],
+                ),
+            }),
         }
     }
 }

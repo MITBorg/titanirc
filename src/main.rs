@@ -62,15 +62,10 @@ async fn main() -> anyhow::Result<()> {
         .pretty();
     subscriber.init();
 
-    let database = sqlx::Pool::connect_with({
-        let mut options = sqlx::any::AnyConnectOptions::from_str(&opts.config.database_uri)?;
-
-        if let Some(sqlite_options) = options.as_sqlite_mut() {
-            *sqlite_options = sqlite_options.clone().create_if_missing(true);
-        }
-
-        options
-    })
+    sqlx::any::install_default_drivers();
+    let database = sqlx::Pool::connect_with(sqlx::any::AnyConnectOptions::from_str(
+        &opts.config.database_uri,
+    )?)
     .await?;
 
     MIGRATOR.run(&database).await?;

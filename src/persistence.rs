@@ -29,7 +29,7 @@ pub struct Persistence {
 impl Persistence {
     /// Grabs the current time to use as an ID, preventing against backwards clockskew.
     fn monotonically_increasing_id(&mut self) -> i64 {
-        let now = Utc::now().timestamp_nanos();
+        let now = Utc::now().timestamp_nanos_opt().unwrap();
 
         self.last_seen_clock = if now <= self.last_seen_clock {
             self.last_seen_clock + 1
@@ -353,7 +353,7 @@ impl Handler<FetchUnseenChannelMessages> for Persistence {
                  ORDER BY timestamp ASC",
             )
             .bind(&msg.channel_name)
-            .bind(max_message_reply_since.timestamp_nanos())
+            .bind(max_message_reply_since.timestamp_nanos_opt().unwrap())
             .bind(msg.user_id.0)
             .fetch_all(&conn)
             .await
@@ -409,9 +409,10 @@ pub async fn truncate_seen_messages(db: sqlx::Pool<sqlx::Any>, max_replay_since:
 
     // delete all messages that have been by all users or have passed their retention period
     for (channel, min_seen_timestamp) in messages {
-        let mut tx = db.begin().await.unwrap();
-
-        let remove_before = std::cmp::max(min_seen_timestamp, max_replay_since.timestamp_nanos());
+        let remove_before = std::cmp::max(
+            min_seen_timestamp,
+            max_replay_since.timestamp_nanos_opt().unwrap(),
+        );
 
         sqlx::query(
             "DELETE FROM channel_messages
@@ -420,10 +421,8 @@ pub async fn truncate_seen_messages(db: sqlx::Pool<sqlx::Any>, max_replay_since:
         )
         .bind(channel)
         .bind(remove_before)
-        .execute(&mut tx)
+        .execute(&db)
         .await
         .unwrap();
-
-        tx.commit().await.unwrap();
     }
 }

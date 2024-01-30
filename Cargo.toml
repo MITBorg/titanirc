@@ -9,7 +9,7 @@ edition = "2021"
 actix = "0.13"
 actix-rt = "2.8"
 anyhow = "1.0"
-argon2 = "0.4"
+argon2 = "0.5"
 base64 = "0.21.0"
 bitflags = "2.0.2"
 bytes = "1.4"
@@ -20,15 +20,15 @@ futures = "0.3"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde-humantime = "0.1"
-sqlx = { version = "0.6", features = ["runtime-actix-rustls", "sqlite", "any"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-toml = "0.7"
+toml = "0.8"
 tokio = { version = "1.25", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 irc-proto = "0.15"
-itertools = "0.10"
+itertools = "0.12"
 
 [patch."crates-io"]
 irc-proto = { git = "https://github.com/JordanForks/irc" }

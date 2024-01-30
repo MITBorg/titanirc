@@ -11,7 +11,7 @@ use crate::{
 
 /// Sent when a user is connecting to the server.
 #[derive(Message, Clone)]
-#[rtype(message = "()")]
+#[rtype(result = "()")]
 pub struct UserConnected {
     pub handle: Addr<Client>,
     pub connection: InitiatedConnection,
@@ -21,7 +21,7 @@ pub struct UserConnected {
 /// Sent to both the `Server` and all connected `Channel`s when the user disconnects from
 /// the server.
 #[derive(Message, Clone)]
-#[rtype(message = "()")]
+#[rtype(result = "()")]
 pub struct ServerDisconnect {
     pub client: Addr<Client>,
     pub message: Option<String>,

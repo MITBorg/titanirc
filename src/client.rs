@@ -36,7 +36,7 @@ use crate::{
         Persistence,
     },
     server::{
-        response::{NoSuchNick, WhoList},
+        response::{IntoProtocol, WhoList},
         Server,
     },
     SERVER_NAME,
@@ -159,10 +159,9 @@ impl Client {
         ctx: &mut Context<Self>,
         channel: &Addr<Channel>,
         message: M,
-        map: impl FnOnce(M::Result, &Self) -> Vec<Message> + 'static,
     ) where
         M: actix::Message + Send + 'static,
-        M::Result: Send,
+        M::Result: Send + IntoProtocol,
         Channel: Handler<M>,
         <Channel as Actor>::Context: ToEnvelope<Channel, M>,
     {
@@ -170,21 +169,17 @@ impl Client {
             .send(message)
             .into_actor(self)
             .map(move |result, ref mut this, _ctx| {
-                for message in (map)(result.unwrap(), this) {
+                for message in result.unwrap().into_messages(&this.connection.nick) {
                     this.writer.write(message);
                 }
             });
         ctx.spawn(fut);
     }
 
-    fn server_send_map_write<M>(
-        &self,
-        ctx: &mut Context<Self>,
-        message: M,
-        map: impl FnOnce(M::Result, &Self) -> Vec<Message> + 'static,
-    ) where
+    fn server_send_map_write<M>(&self, ctx: &mut Context<Self>, message: M)
+    where
         M: actix::Message + Send + 'static,
-        M::Result: Send,
+        M::Result: Send + IntoProtocol,
         Server: Handler<M>,
         <Server as Actor>::Context: ToEnvelope<Server, M>,
     {
@@ -193,7 +188,7 @@ impl Client {
                 .send(message)
                 .into_actor(self)
                 .map(move |result, ref mut this, _ctx| {
-                    for message in (map)(result.unwrap(), this) {
+                    for message in result.unwrap().into_messages(&this.connection.nick) {
                         this.writer.write(message);
                     }
                 });
@@ -304,7 +299,7 @@ impl Handler<ForceDisconnect> for Client {
 
     fn handle(&mut self, _msg: ForceDisconnect, ctx: &mut Self::Context) -> Self::Result {
         ctx.stop();
-        MessageResult(true)
+        MessageResult(Ok(()))
     }
 }
 
@@ -450,7 +445,9 @@ impl Handler<JoinChannelRequest> for Client {
                     Ok(v) => v,
                     Err(error) => {
                         error!(?error, "User failed to join channel");
-                        this.writer.write(error.into_message());
+                        for m in error.into_messages(&this.connection.nick) {
+                            this.writer.write(m);
+                        }
                         continue;
                     }
                 };
@@ -718,8 +715,10 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     self.channel_send_map_write(
                         ctx,
                         channel,
-                        ChannelFetchTopic { span },
-                        |res, this| res.into_messages(this.connection.nick.to_string(), false),
+                        ChannelFetchTopic {
+                            span,
+                            skip_on_none: false,
+                        },
                     );
                 }
             }
@@ -740,9 +739,7 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             }
             Command::LIST(_, _) => {
                 let span = Span::current();
-                self.server_send_map_write(ctx, ChannelList { span }, |res, this| {
-                    res.into_messages(this.connection.nick.to_string())
-                });
+                self.server_send_map_write(ctx, ChannelList { span });
             }
             Command::INVITE(nick, channel) => {
                 let Some(channel) = self.channels.get(&channel) else {
@@ -800,15 +797,11 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             }
             Command::MOTD(_) => {
                 let span = Span::current();
-                self.server_send_map_write(ctx, ServerFetchMotd { span }, |res, this| {
-                    res.into_messages(this.connection.nick.to_string())
-                });
+                self.server_send_map_write(ctx, ServerFetchMotd { span });
             }
             Command::LUSERS(_, _) => {
                 let span = Span::current();
-                self.server_send_map_write(ctx, ServerListUsers { span }, |res, this| {
-                    res.into_messages(&this.connection.nick)
-                });
+                self.server_send_map_write(ctx, ServerListUsers { span });
             }
             Command::VERSION(_) => {
                 self.writer.write(Message {
@@ -843,9 +836,7 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             }
             Command::ADMIN(_) => {
                 let span = Span::current();
-                self.server_send_map_write(ctx, ServerAdminInfo { span }, |res, this| {
-                    res.into_messages(&this.connection.nick)
-                });
+                self.server_send_map_write(ctx, ServerAdminInfo { span });
             }
             Command::INFO(_) => {
                 static INFO_STR: &str = include_str!("../text/info.txt");
@@ -874,15 +865,11 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             }
             Command::WHO(Some(query), _) => {
                 let span = Span::current();
-                self.server_send_map_write(ctx, FetchWhoList { span, query }, |res, this| {
-                    res.into_messages(&this.connection.nick)
-                });
+                self.server_send_map_write(ctx, FetchWhoList { span, query });
             }
             Command::WHOIS(Some(query), _) => {
                 let span = Span::current();
-                self.server_send_map_write(ctx, FetchWhois { span, query }, |res, this| {
-                    res.into_messages(&this.connection.nick)
-                });
+                self.server_send_map_write(ctx, FetchWhois { span, query });
             }
             Command::WHOWAS(_, _, _) => {}
             Command::KILL(nick, comment) => {
@@ -936,15 +923,8 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     ctx,
                     ForceDisconnect {
                         span,
-                        user: user.to_string(),
+                        user,
                         comment,
-                    },
-                    move |res, this| {
-                        if res {
-                            vec![]
-                        } else {
-                            NoSuchNick { nick: user }.into_messages(&this.connection.nick)
-                        }
                     },
                 );
             }

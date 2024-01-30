@@ -31,7 +31,7 @@ use crate::{
         UserNickChangeInternal, Wallops,
     },
     persistence::Persistence,
-    server::response::{AdminInfo, ListUsers, Motd, WhoList, Whois},
+    server::response::{AdminInfo, IntoProtocol, ListUsers, Motd, NoSuchNick, WhoList, Whois},
     SERVER_NAME,
 };
 
@@ -124,7 +124,7 @@ impl Handler<UserConnected> for Server {
             });
         }
 
-        for message in Motd::new(self).into_messages(msg.connection.nick.clone()) {
+        for message in Motd::new(self).into_messages(&msg.connection.nick) {
             msg.handle.do_send(Broadcast {
                 span: Span::current(),
                 message,
@@ -313,9 +313,9 @@ impl Handler<ForceDisconnect> for Server {
     fn handle(&mut self, msg: ForceDisconnect, _ctx: &mut Self::Context) -> Self::Result {
         if let Some((handle, _)) = self.clients.iter().find(|(_, v)| v.nick == msg.user) {
             handle.do_send(msg);
-            MessageResult(true)
+            MessageResult(Ok(()))
         } else {
-            MessageResult(false)
+            MessageResult(Err(NoSuchNick { nick: msg.user }))
         }
     }
 }
@@ -371,6 +371,7 @@ impl Handler<ChannelList> for Server {
             .map(|channel| {
                 let fetch_topic = channel.send(ChannelFetchTopic {
                     span: Span::current(),
+                    skip_on_none: true,
                 });
 
                 let fetch_members = channel.send(ChannelMemberList {

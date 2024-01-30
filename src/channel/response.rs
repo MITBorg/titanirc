@@ -4,25 +4,29 @@ use itertools::Itertools;
 use crate::{
     channel::{permissions::Permission, Channel, CurrentChannelTopic},
     connection::InitiatedConnection,
+    server::response::IntoProtocol,
     SERVER_NAME,
 };
 
 pub struct ChannelTopic {
     pub channel_name: String,
     pub topic: Option<CurrentChannelTopic>,
+    pub skip_on_none: bool,
 }
 
 impl ChannelTopic {
     #[must_use]
-    pub fn new(channel: &Channel) -> Self {
+    pub fn new(channel: &Channel, skip_on_none: bool) -> Self {
         Self {
             channel_name: channel.name.to_string(),
             topic: channel.topic.clone(),
+            skip_on_none,
         }
     }
+}
 
-    #[must_use]
-    pub fn into_messages(self, for_user: String, skip_on_none: bool) -> Vec<Message> {
+impl IntoProtocol for ChannelTopic {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
         if let Some(topic) = self.topic {
             vec![
                 Message {
@@ -43,7 +47,7 @@ impl ChannelTopic {
                     command: Command::Response(
                         Response::RPL_TOPICWHOTIME,
                         vec![
-                            for_user,
+                            for_user.to_string(),
                             self.channel_name.to_string(),
                             topic.set_by,
                             topic.set_time.timestamp().to_string(),
@@ -51,13 +55,17 @@ impl ChannelTopic {
                     ),
                 },
             ]
-        } else if !skip_on_none {
+        } else if !self.skip_on_none {
             vec![Message {
                 tags: None,
                 prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
                 command: Command::Response(
                     Response::RPL_NOTOPIC,
-                    vec![for_user, self.channel_name, "No topic is set".to_string()],
+                    vec![
+                        for_user.to_string(),
+                        self.channel_name,
+                        "No topic is set".to_string(),
+                    ],
                 ),
             }]
         } else {
@@ -83,9 +91,10 @@ impl ChannelWhoList {
                 .collect(),
         }
     }
+}
 
-    #[must_use]
-    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+impl IntoProtocol for ChannelWhoList {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
         let mut out = Vec::with_capacity(self.nick_list.len());
 
         for (perm, conn) in self.nick_list {
@@ -233,18 +242,17 @@ pub enum ChannelJoinRejectionReason {
     Banned,
 }
 
-impl ChannelJoinRejectionReason {
-    #[must_use]
-    pub fn into_message(self) -> Message {
+impl IntoProtocol for ChannelJoinRejectionReason {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
         match self {
-            Self::Banned => Message {
+            Self::Banned => vec![Message {
                 tags: None,
                 prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
                 command: Command::Response(
                     Response::ERR_BANNEDFROMCHAN,
-                    vec!["Cannot join channel (+b)".to_string()],
+                    vec![for_user.to_string(), "Cannot join channel (+b)".to_string()],
                 ),
-            },
+            }],
         }
     }
 }

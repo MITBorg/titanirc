@@ -11,9 +11,8 @@ pub struct Whois {
     pub channels: Vec<(Permission, String)>,
 }
 
-impl Whois {
-    #[must_use]
-    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+impl IntoProtocol for Whois {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
         macro_rules! msg {
             ($response:ident, $($payload:expr),*) => {
 
@@ -88,9 +87,8 @@ pub struct NoSuchNick {
     pub nick: String,
 }
 
-impl NoSuchNick {
-    #[must_use]
-    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+impl IntoProtocol for NoSuchNick {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
         vec![Message {
             tags: None,
             prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
@@ -108,9 +106,8 @@ pub struct WhoList {
     pub query: String,
 }
 
-impl WhoList {
-    #[must_use]
-    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+impl IntoProtocol for WhoList {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
         let mut out: Vec<_> = self
             .list
             .into_iter()
@@ -140,9 +137,8 @@ pub struct AdminInfo {
     pub email: String,
 }
 
-impl AdminInfo {
-    #[must_use]
-    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+impl IntoProtocol for AdminInfo {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
         macro_rules! msg {
             ($response:ident, $($payload:expr),*) => {
 
@@ -177,9 +173,9 @@ pub struct ListUsers {
     pub channels_formed: usize,
 }
 
-impl ListUsers {
+impl IntoProtocol for ListUsers {
     #[must_use]
-    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
         macro_rules! msg {
             ($response:ident, $($payload:expr),*) => {
 
@@ -253,11 +249,15 @@ impl Motd {
             motd: server.config.motd.clone(),
         }
     }
+}
 
+impl IntoProtocol for Motd {
     #[must_use]
-    pub fn into_messages(self, for_user: String) -> Vec<Message> {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
+        let mut out = Vec::new();
+
         if let Some(motd) = self.motd {
-            let mut motd_messages = vec![Message {
+            out.push(Message {
                 tags: None,
                 prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
                 command: Command::Response(
@@ -267,9 +267,9 @@ impl Motd {
                         format!("- {SERVER_NAME} Message of the day -"),
                     ],
                 ),
-            }];
+            });
 
-            motd_messages.extend(motd.trim().split('\n').map(|v| Message {
+            out.extend(motd.trim().split('\n').map(|v| Message {
                 tags: None,
                 prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
                 command: Command::Response(
@@ -278,26 +278,26 @@ impl Motd {
                 ),
             }));
 
-            motd_messages.push(Message {
+            out.push(Message {
                 tags: None,
                 prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
                 command: Command::Response(
                     Response::RPL_ENDOFMOTD,
-                    vec![for_user, "End of /MOTD command.".to_string()],
+                    vec![for_user.to_string(), "End of /MOTD command.".to_string()],
                 ),
             });
-
-            motd_messages
         } else {
-            vec![Message {
+            out.push(Message {
                 tags: None,
                 prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
                 command: Command::Response(
                     Response::ERR_NOMOTD,
-                    vec![for_user, "MOTD File is missing".to_string()],
+                    vec![for_user.to_string(), "MOTD File is missing".to_string()],
                 ),
-            }]
+            });
         }
+
+        out
     }
 }
 
@@ -306,9 +306,9 @@ pub struct ChannelList {
     pub members: Vec<ChannelListItem>,
 }
 
-impl ChannelList {
+impl IntoProtocol for ChannelList {
     #[must_use]
-    pub fn into_messages(self, for_user: String) -> Vec<Message> {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
         let mut messages = Vec::with_capacity(self.members.len() + 2);
 
         messages.push(Message {
@@ -345,7 +345,7 @@ impl ChannelList {
             prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
             command: Command::Response(
                 Response::RPL_LISTEND,
-                vec![for_user, "End of /LIST".to_string()],
+                vec![for_user.to_string(), "End of /LIST".to_string()],
             ),
         });
 
@@ -357,4 +357,28 @@ pub struct ChannelListItem {
     pub channel_name: String,
     pub client_count: usize,
     pub topic: Option<String>,
+}
+
+pub trait IntoProtocol {
+    #[must_use]
+    fn into_messages(self, for_user: &str) -> Vec<Message>;
+}
+
+impl IntoProtocol for () {
+    fn into_messages(self, _for_user: &str) -> Vec<Message> {
+        vec![]
+    }
+}
+
+impl<T, E> IntoProtocol for Result<T, E>
+where
+    T: IntoProtocol,
+    E: IntoProtocol,
+{
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
+        match self {
+            Ok(v) => v.into_messages(for_user),
+            Err(e) => e.into_messages(for_user),
+        }
+    }
 }

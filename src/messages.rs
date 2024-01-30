@@ -7,6 +7,7 @@ use crate::{
     channel::Channel,
     client::Client,
     connection::{InitiatedConnection, UserId},
+    server::response::NoSuchNick,
 };
 
 /// Sent when a user is connecting to the server.
@@ -38,7 +39,7 @@ pub struct KillUser {
 }
 
 #[derive(Message, Clone)]
-#[rtype(result = "bool")]
+#[rtype(result = "Result<(), NoSuchNick>")]
 pub struct ForceDisconnect {
     pub span: Span,
     pub user: String,
@@ -151,6 +152,7 @@ pub struct FetchUserPermission {
 #[rtype(result = "super::channel::response::ChannelTopic")]
 pub struct ChannelFetchTopic {
     pub span: Span,
+    pub skip_on_none: bool,
 }
 
 /// Retrieves the WHO list for the channel.

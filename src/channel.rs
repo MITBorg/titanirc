@@ -32,7 +32,7 @@ use crate::{
         events::{FetchAllUserChannelPermissions, SetUserChannelPermissions},
         Persistence,
     },
-    server::Server,
+    server::{response::IntoProtocol, Server},
 };
 
 #[derive(Copy, Clone)]
@@ -441,7 +441,7 @@ impl Handler<ChannelJoin> for Channel {
         }
 
         // send the channel's topic to the joining user
-        for message in ChannelTopic::new(self).into_messages(self.name.to_string(), true) {
+        for message in ChannelTopic::new(self, true).into_messages(&self.name) {
             msg.client.do_send(Broadcast {
                 message,
                 span: Span::current(),
@@ -497,8 +497,7 @@ impl Handler<ChannelUpdateTopic> for Channel {
         });
 
         for (client, connection) in &self.clients {
-            for message in ChannelTopic::new(self).into_messages(connection.nick.to_string(), false)
-            {
+            for message in ChannelTopic::new(self, false).into_messages(&connection.nick) {
                 client.do_send(Broadcast {
                     message,
                     span: Span::current(),
@@ -569,7 +568,7 @@ impl Handler<ChannelFetchTopic> for Channel {
 
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: ChannelFetchTopic, _ctx: &mut Self::Context) -> Self::Result {
-        MessageResult(ChannelTopic::new(self))
+        MessageResult(ChannelTopic::new(self, msg.skip_on_none))
     }
 }
 

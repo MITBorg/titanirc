@@ -156,14 +156,18 @@ pub async fn negotiate_client_connection(
                     .unwrap();
             }
             Command::CAP(_, CapSubCommand::REQ, Some(arguments), None) => {
-                let acked = if arguments == "sasl" {
-                    true
-                } else if let Ok(capability) = Capability::from_str(&arguments) {
-                    request.capabilities |= capability;
-                    true
-                } else {
-                    false
-                };
+                let mut acked = true;
+
+                for argument in arguments.split(' ') {
+                    acked = if argument == "sasl" {
+                        acked
+                    } else if let Ok(capability) = Capability::from_str(argument) {
+                        request.capabilities |= capability;
+                        acked
+                    } else {
+                        false
+                    };
+                }
 
                 write
                     .send(AcknowledgedCapabilities(arguments, acked).into_message())

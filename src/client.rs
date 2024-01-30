@@ -24,9 +24,9 @@ use crate::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
         ChannelKickUser, ChannelList, ChannelMemberList, ChannelMessage, ChannelPart,
         ChannelSetMode, ChannelUpdateTopic, ClientAway, ConnectedChannels, FetchClientDetails,
-        FetchUserPermission, FetchWhoList, FetchWhois, KillUser, MessageKind, PrivateMessage,
-        ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers, UserKickedFromChannel,
-        UserNickChange, UserNickChangeInternal, Wallops,
+        FetchUserPermission, FetchWhoList, FetchWhois, ForceDisconnect, KillUser, MessageKind,
+        PrivateMessage, ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers,
+        UserKickedFromChannel, UserNickChange, UserNickChangeInternal, Wallops,
     },
     persistence::{
         events::{
@@ -35,7 +35,10 @@ use crate::{
         },
         Persistence,
     },
-    server::{response::WhoList, Server},
+    server::{
+        response::{NoSuchNick, WhoList},
+        Server,
+    },
     SERVER_NAME,
 };
 
@@ -296,6 +299,15 @@ impl Handler<ConnectedChannels> for Client {
     }
 }
 
+impl Handler<ForceDisconnect> for Client {
+    type Result = MessageResult<ForceDisconnect>;
+
+    fn handle(&mut self, _msg: ForceDisconnect, ctx: &mut Self::Context) -> Self::Result {
+        ctx.stop();
+        MessageResult(true)
+    }
+}
+
 /// Retrieves the entire WHO list for the user.
 impl Handler<FetchWhoList> for Client {
     type Result = ResponseFuture<<FetchWhoList as actix::Message>::Result>;
@@ -380,7 +392,7 @@ impl Handler<SetAway> for Client {
 impl Handler<KillUser> for Client {
     type Result = ();
 
-    #[instrument(parent = & msg.span, skip_all)]
+    #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: KillUser, ctx: &mut Self::Context) -> Self::Result {
         self.server_leave_reason = Some(format!("Killed ({} ({}))", msg.killer, msg.comment));
         ctx.stop();
@@ -900,7 +912,6 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::REHASH => {}
             Command::DIE => {}
             Command::RESTART => {}
-            Command::USERS(_) => {}
             Command::WALLOPS(message) if self.connection.mode.contains(UserMode::OPER) => {
                 self.server.do_send(Wallops {
                     span: Span::current(),
@@ -919,7 +930,24 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                 });
             }
             Command::SAPART(_, _) => {}
-            Command::SAQUIT(_, _) => {}
+            Command::SAQUIT(user, comment) if self.connection.mode.contains(UserMode::OPER) => {
+                let span = Span::current();
+                self.server_send_map_write(
+                    ctx,
+                    ForceDisconnect {
+                        span,
+                        user: user.to_string(),
+                        comment,
+                    },
+                    move |res, this| {
+                        if res {
+                            vec![]
+                        } else {
+                            NoSuchNick { nick: user }.into_messages(&this.connection.nick)
+                        }
+                    },
+                );
+            }
             Command::AUTHENTICATE(_) => {
                 self.writer.write(
                     SaslAlreadyAuthenticated(self.connection.nick.to_string()).into_message(),

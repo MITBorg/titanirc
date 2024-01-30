@@ -26,9 +26,9 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelJoin, ChannelList,
         ChannelMemberList, ClientAway, ConnectedChannels, FetchClientByNick, FetchWhoList,
-        FetchWhois, KillUser, MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect,
-        ServerFetchMotd, ServerListUsers, UserConnected, UserNickChange, UserNickChangeInternal,
-        Wallops,
+        FetchWhois, ForceDisconnect, KillUser, MessageKind, PrivateMessage, ServerAdminInfo,
+        ServerDisconnect, ServerFetchMotd, ServerListUsers, UserConnected, UserNickChange,
+        UserNickChangeInternal, Wallops,
     },
     persistence::Persistence,
     server::response::{AdminInfo, ListUsers, Motd, WhoList, Whois},
@@ -303,6 +303,20 @@ impl Handler<FetchWhois> for Server {
                 channels: channels.await.unwrap(),
             }
         })
+    }
+}
+
+impl Handler<ForceDisconnect> for Server {
+    type Result = MessageResult<ForceDisconnect>;
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: ForceDisconnect, _ctx: &mut Self::Context) -> Self::Result {
+        if let Some((handle, _)) = self.clients.iter().find(|(_, v)| v.nick == msg.user) {
+            handle.do_send(msg);
+            MessageResult(true)
+        } else {
+            MessageResult(false)
+        }
     }
 }
 

@@ -84,6 +84,24 @@ impl Whois {
     }
 }
 
+pub struct NoSuchNick {
+    pub nick: String,
+}
+
+impl NoSuchNick {
+    #[must_use]
+    pub fn into_messages(self, for_user: &str) -> Vec<Message> {
+        vec![Message {
+            tags: None,
+            prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+            command: Command::Response(
+                Response::ERR_NOSUCHNICK,
+                vec![for_user.to_string(), self.nick, "No such nick".to_string()],
+            ),
+        }]
+    }
+}
+
 #[derive(Default)]
 pub struct WhoList {
     pub list: Vec<crate::channel::response::ChannelWhoList>,

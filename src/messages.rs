@@ -37,6 +37,14 @@ pub struct KillUser {
     pub killed: String,
 }
 
+#[derive(Message, Clone)]
+#[rtype(result = "bool")]
+pub struct ForceDisconnect {
+    pub span: Span,
+    pub user: String,
+    pub comment: String,
+}
+
 /// Internal event to update a user's nick.
 #[derive(Message, Clone)]
 #[rtype(result = "()")]

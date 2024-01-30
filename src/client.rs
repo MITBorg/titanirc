@@ -24,7 +24,7 @@ use crate::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
         ChannelKickUser, ChannelList, ChannelMemberList, ChannelMessage, ChannelPart,
         ChannelSetMode, ChannelUpdateTopic, ClientAway, ConnectedChannels, FetchClientDetails,
-        FetchUserPermission, FetchWhoList, FetchWhois, MessageKind, PrivateMessage,
+        FetchUserPermission, FetchWhoList, FetchWhois, KillUser, MessageKind, PrivateMessage,
         ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers, UserKickedFromChannel,
         UserNickChange, UserNickChangeInternal, Wallops,
     },
@@ -246,7 +246,10 @@ impl Actor for Client {
             command: Command::ERROR(if self.graceful_shutdown {
                 String::new()
             } else {
-                message.unwrap_or_else(|| "Ungraceful shutdown".to_string())
+                format!(
+                    "Closing Link: {}",
+                    message.as_deref().unwrap_or("Ungraceful shutdown")
+                )
             }),
         });
     }
@@ -370,6 +373,17 @@ impl Handler<SetAway> for Client {
             prefix: None,
             command: resp,
         });
+    }
+}
+
+/// Disconnects the current user from the server as a result of the `KILL` command.
+impl Handler<KillUser> for Client {
+    type Result = ();
+
+    #[instrument(parent = & msg.span, skip_all)]
+    fn handle(&mut self, msg: KillUser, ctx: &mut Self::Context) -> Self::Result {
+        self.server_leave_reason = Some(format!("Killed ({} ({}))", msg.killer, msg.comment));
+        ctx.stop();
     }
 }
 
@@ -859,7 +873,14 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                 });
             }
             Command::WHOWAS(_, _, _) => {}
-            Command::KILL(_, _) => {}
+            Command::KILL(nick, comment) => {
+                self.server.do_send(KillUser {
+                    span: Span::current(),
+                    killer: self.connection.nick.to_string(),
+                    comment,
+                    killed: nick,
+                });
+            }
             Command::PING(v, _) => {
                 self.writer.write(Message {
                     tags: None,
@@ -899,12 +920,6 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             }
             Command::SAPART(_, _) => {}
             Command::SAQUIT(_, _) => {}
-            Command::NICKSERV(_) => {}
-            Command::CHANSERV(_) => {}
-            Command::OPERSERV(_) => {}
-            Command::BOTSERV(_) => {}
-            Command::HOSTSERV(_) => {}
-            Command::MEMOSERV(_) => {}
             Command::AUTHENTICATE(_) => {
                 self.writer.write(
                     SaslAlreadyAuthenticated(self.connection.nick.to_string()).into_message(),

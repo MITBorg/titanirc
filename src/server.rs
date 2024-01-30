@@ -26,7 +26,7 @@ use crate::{
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelJoin, ChannelList,
         ChannelMemberList, ClientAway, ConnectedChannels, FetchClientByNick, FetchWhoList,
-        FetchWhois, MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect,
+        FetchWhois, KillUser, MessageKind, PrivateMessage, ServerAdminInfo, ServerDisconnect,
         ServerFetchMotd, ServerListUsers, UserConnected, UserNickChange, UserNickChangeInternal,
         Wallops,
     },
@@ -234,6 +234,20 @@ impl Handler<UserNickChange> for Server {
         if let Some(client) = self.clients.get_mut(&msg.client) {
             *client = msg.connection;
             client.nick = msg.new_nick;
+        }
+    }
+}
+
+/// Looks up a user to disconnect and sends the disconnect notification.
+impl Handler<KillUser> for Server {
+    type Result = ();
+
+    #[instrument(parent = &msg.span, skip_all)]
+    fn handle(&mut self, msg: KillUser, _ctx: &mut Self::Context) -> Self::Result {
+        for (handle, user) in &self.clients {
+            if user.nick == msg.killed {
+                handle.do_send(msg.clone());
+            }
         }
     }
 }

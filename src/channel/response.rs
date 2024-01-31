@@ -1,3 +1,5 @@
+use std::iter::once;
+
 use irc_proto::{Command, Message, Prefix, Response};
 use itertools::Itertools;
 
@@ -121,6 +123,51 @@ impl IntoProtocol for ChannelWhoList {
         }
 
         out
+    }
+}
+
+pub enum ModeList {
+    Ban(BanList),
+}
+
+impl IntoProtocol for ModeList {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
+        match self {
+            Self::Ban(l) => l.into_messages(for_user),
+        }
+    }
+}
+
+pub struct BanList {
+    pub channel: String,
+    pub list: Vec<String>,
+}
+
+impl IntoProtocol for BanList {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
+        self.list
+            .into_iter()
+            .map(|mask| Message {
+                tags: None,
+                prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                command: Command::Response(
+                    Response::RPL_BANLIST,
+                    vec![for_user.to_string(), self.channel.to_string(), mask],
+                ),
+            })
+            .chain(once(Message {
+                tags: None,
+                prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                command: Command::Response(
+                    Response::RPL_ENDOFBANLIST,
+                    vec![
+                        for_user.to_string(),
+                        self.channel.to_string(),
+                        "End of channel ban list".to_string(),
+                    ],
+                ),
+            }))
+            .collect()
     }
 }
 

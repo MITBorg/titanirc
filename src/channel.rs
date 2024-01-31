@@ -16,8 +16,8 @@ use crate::{
     channel::{
         permissions::Permission,
         response::{
-            ChannelInviteResult, ChannelJoinRejectionReason, ChannelNamesList, ChannelTopic,
-            ChannelWhoList, MissingPrivileges,
+            BanList, ChannelInviteResult, ChannelJoinRejectionReason, ChannelNamesList,
+            ChannelTopic, ChannelWhoList, MissingPrivileges, ModeList,
         },
     },
     client::Client,
@@ -241,12 +241,12 @@ impl Handler<ChannelFetchWhoList> for Channel {
 }
 
 impl Handler<ChannelSetMode> for Channel {
-    type Result = ();
+    type Result = MessageResult<ChannelSetMode>;
 
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: ChannelSetMode, ctx: &mut Self::Context) -> Self::Result {
         let Some(client) = self.clients.get(&msg.client).cloned() else {
-            return;
+            return MessageResult(None);
         };
 
         for mode in msg.modes {
@@ -258,9 +258,24 @@ impl Handler<ChannelSetMode> for Channel {
 
             if let Ok(user_mode) = Permission::try_from(channel_mode) {
                 let Some(affected_mask) = arg else {
-                    // TODO: return error to caller
+                    if add && matches!(user_mode, Permission::Ban) {
+                        // list is readable and the user didn't supply a mask, so
+                        // return the list
+                        let bans = BanList {
+                            channel: self.name.to_string(),
+                            list: self
+                                .permissions
+                                .iter()
+                                .filter(|(_, v)| matches!(v, Permission::Ban))
+                                .map(|(k, _)| k)
+                                .collect(),
+                        };
+
+                        return MessageResult(Some(ModeList::Ban(bans)));
+                    }
+
                     error!("No user given");
-                    continue;
+                    break;
                 };
 
                 let Ok(affected_mask) = HostMask::try_from(affected_mask.as_str()) else {
@@ -280,6 +295,8 @@ impl Handler<ChannelSetMode> for Channel {
                 // TODO
             }
         }
+
+        MessageResult(None)
     }
 }
 

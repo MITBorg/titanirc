@@ -407,6 +407,12 @@ impl IntoProtocol for () {
     }
 }
 
+impl<T: IntoProtocol> IntoProtocol for Option<T> {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
+        self.map_or_else(Vec::new, |v| v.into_messages(for_user))
+    }
+}
+
 impl<T, E> IntoProtocol for Result<T, E>
 where
     T: IntoProtocol,

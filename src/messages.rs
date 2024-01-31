@@ -165,7 +165,7 @@ pub struct ChannelFetchWhoList {
 
 /// Sets the given modes on a channel.
 #[derive(Message)]
-#[rtype(result = "()")]
+#[rtype(result = "Option<super::channel::response::ModeList>")]
 pub struct ChannelSetMode {
     pub span: Span,
     pub client: Addr<Client>,

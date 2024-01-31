@@ -3,9 +3,11 @@ use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
     io::{Error, ErrorKind},
+    iter::once,
     str::FromStr,
 };
 
+use itertools::Either;
 use sqlx::{
     database::{HasArguments, HasValueRef},
     encode::IsNull,
@@ -29,6 +31,36 @@ impl<T> HostMaskMap<T> {
             children: HashMap::new(),
             matcher: Matcher::Nick,
         }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (String, &T)> {
+        self.iter_inner(String::new(), self.matcher)
+    }
+
+    fn iter_inner(&self, s: String, last_seen: Matcher) -> impl Iterator<Item = (String, &T)> {
+        self.children
+            .iter()
+            .flat_map(move |(k, v)| {
+                let (k, next_matcher) = match k {
+                    Key::Wildcard => (
+                        format!("{s}*{}", last_seen.splitter()),
+                        last_seen.next().unwrap_or(last_seen),
+                    ),
+                    Key::EndOfString => (
+                        format!("{s}{}", last_seen.splitter()),
+                        last_seen.next().unwrap_or(last_seen),
+                    ),
+                    Key::Char(c) => (format!("{s}{c}"), last_seen),
+                };
+
+                match v {
+                    Node::Match(v) => Either::Left(once((k, v))),
+                    Node::Inner(v) => Either::Right(v.iter_inner(k, next_matcher)),
+                }
+            })
+            // TODO
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     #[must_use]
@@ -175,6 +207,14 @@ impl Matcher {
             Self::Nick => Some(Self::Username),
             Self::Username => Some(Self::Host),
             Self::Host => None,
+        }
+    }
+
+    const fn splitter(self) -> &'static str {
+        match self {
+            Self::Nick => "!",
+            Self::Username => "@",
+            Self::Host => "",
         }
     }
 }

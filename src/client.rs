@@ -690,11 +690,15 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
                     return;
                 };
 
-                channel.do_send(ChannelSetMode {
-                    span: Span::current(),
-                    client: ctx.address(),
-                    modes,
-                });
+                self.channel_send_map_write(
+                    ctx,
+                    channel,
+                    ChannelSetMode {
+                        span: Span::current(),
+                        client: ctx.address(),
+                        modes,
+                    },
+                );
             }
             Command::TOPIC(channel, topic) => {
                 let Some(channel) = self.channels.get(&channel) else {

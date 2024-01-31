@@ -15,6 +15,10 @@ use futures::SinkExt;
 use irc_proto::{Command, IrcCodec, Message};
 use rand::seq::SliceRandom;
 use sqlx::migrate::Migrator;
+use titanircd::{
+    client::Client, config::Args, connection, messages::UserConnected, persistence::Persistence,
+    server::Server,
+};
 use tokio::{
     io::WriteHalf,
     net::{TcpListener, TcpStream},
@@ -23,21 +27,6 @@ use tokio::{
 use tokio_util::codec::FramedRead;
 use tracing::{error, info, info_span, Instrument};
 use tracing_subscriber::EnvFilter;
-
-use crate::{
-    client::Client, config::Args, messages::UserConnected, persistence::Persistence, server::Server,
-};
-
-pub mod channel;
-pub mod client;
-pub mod config;
-pub mod connection;
-pub mod database;
-pub mod messages;
-pub mod persistence;
-pub mod server;
-
-pub const SERVER_NAME: &str = "my.cool.server";
 
 static MIGRATOR: Migrator = sqlx::migrate!();
 

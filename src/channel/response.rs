@@ -87,7 +87,7 @@ impl ChannelWhoList {
             nick_list: channel
                 .clients
                 .values()
-                .map(|v| (channel.get_user_permissions(v.user_id), v.clone()))
+                .map(|v| (channel.get_user_permissions(&v.to_host_mask()), v.clone()))
                 .collect(),
         }
     }
@@ -109,7 +109,7 @@ impl IntoProtocol for ChannelWhoList {
                         for_user.to_string(),
                         self.channel_name.to_string(),
                         conn.user,
-                        conn.host.to_string(),
+                        conn.cloak.to_string(),
                         SERVER_NAME.to_string(),
                         conn.nick,
                         format!("{presence}{}", perm.into_prefix()), // TODO: user modes & server operator
@@ -137,7 +137,7 @@ impl ChannelNamesList {
             nick_list: channel
                 .clients
                 .values()
-                .map(|v| (channel.get_user_permissions(v.user_id), v.clone()))
+                .map(|v| (channel.get_user_permissions(&v.to_host_mask()), v.clone()))
                 .collect(),
         }
     }

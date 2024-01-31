@@ -23,6 +23,7 @@ use crate::{
     client::Client,
     config::Config,
     connection::{InitiatedConnection, UserMode},
+    host_mask::HostMaskMap,
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelJoin, ChannelList,
         ChannelMemberList, ClientAway, ConnectedChannels, FetchClientByNick, FetchWhoList,
@@ -200,7 +201,7 @@ impl Handler<ChannelJoin> for Server {
 
                 Supervisor::start_in_arbiter(&arbiter, move |_ctx| Channel {
                     name: channel_name,
-                    permissions: HashMap::new(),
+                    permissions: HostMaskMap::new(),
                     clients: HashMap::new(),
                     topic: None,
                     server,

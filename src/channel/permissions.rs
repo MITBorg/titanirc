@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use anyhow::anyhow;
 use irc_proto::{ChannelMode, Mode};
 
@@ -10,6 +12,23 @@ pub enum Permission {
     HalfOperator = i16::MAX - 2,
     Operator = i16::MAX - 1,
     Founder = i16::MAX,
+}
+
+impl PartialOrd for Permission {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Permission {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // order `ban` ahead of `normal`
+        match (*self as i16, *other as i16) {
+            (-1, 0) => Ordering::Less,
+            (0, -1) => Ordering::Greater,
+            _ => (*self as i16).cmp(&(*other as i16)),
+        }
+    }
 }
 
 impl TryFrom<ChannelMode> for Permission {
@@ -33,12 +52,12 @@ impl Permission {
 
     /// Builds the mode message that's used to set (or unset) this permission.
     #[must_use]
-    pub fn into_mode(self, add: bool, nick: String) -> Option<Mode<ChannelMode>> {
+    pub fn into_mode(self, add: bool, mask: String) -> Option<Mode<ChannelMode>> {
         <Option<ChannelMode>>::from(self).map(|v| {
             if add {
-                Mode::Plus(v, Some(nick))
+                Mode::Plus(v, Some(mask))
             } else {
-                Mode::Minus(v, Some(nick))
+                Mode::Minus(v, Some(mask))
             }
         })
     }

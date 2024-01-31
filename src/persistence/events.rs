@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use actix::Message;
 use chrono::{DateTime, Utc};
 use tracing::Span;
@@ -7,6 +5,7 @@ use tracing::Span;
 use crate::{
     channel::{permissions::Permission, ChannelId},
     connection::UserId,
+    host_mask::{HostMask, HostMaskMap},
     messages::MessageKind,
 };
 
@@ -40,7 +39,7 @@ pub struct FetchUserChannels {
 }
 
 #[derive(Message)]
-#[rtype(result = "HashMap<UserId, Permission>")]
+#[rtype(result = "HostMaskMap<Permission>")]
 pub struct FetchAllUserChannelPermissions {
     pub channel_id: ChannelId,
 }
@@ -49,7 +48,7 @@ pub struct FetchAllUserChannelPermissions {
 #[rtype(result = "()")]
 pub struct SetUserChannelPermissions {
     pub channel_id: ChannelId,
-    pub user_id: UserId,
+    pub mask: HostMask<'static>,
     pub permissions: Permission,
 }
 

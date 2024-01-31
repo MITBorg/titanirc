@@ -7,6 +7,7 @@ use crate::{
     channel::Channel,
     client::Client,
     connection::{InitiatedConnection, UserId},
+    host_mask::HostMask,
     server::response::NoSuchNick,
 };
 
@@ -144,7 +145,7 @@ pub struct ChannelMemberList {
 #[rtype(result = "crate::channel::permissions::Permission")]
 pub struct FetchUserPermission {
     pub span: Span,
-    pub user: UserId,
+    pub host_mask: HostMask<'static>,
 }
 
 /// Retrieves the current channel topic.

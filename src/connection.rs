@@ -29,6 +29,7 @@ use crate::{
         authenticate::{Authenticate, AuthenticateMessage, AuthenticateResult},
         sasl::{AuthStrategy, ConnectionSuccess, SaslSuccess},
     },
+    host_mask::HostMask,
     persistence::{events::ReserveNick, Persistence},
 };
 
@@ -52,6 +53,7 @@ pub struct ConnectionRequest {
 #[derive(Clone, Debug)]
 pub struct InitiatedConnection {
     pub host: SocketAddr,
+    pub cloak: String,
     pub nick: String,
     pub user: String,
     pub mode: UserMode,
@@ -68,8 +70,13 @@ impl InitiatedConnection {
         Prefix::Nickname(
             self.nick.to_string(),
             self.user.to_string(),
-            self.host.ip().to_string(),
+            self.cloak.to_string(),
         )
+    }
+
+    #[must_use]
+    pub fn to_host_mask(&self) -> HostMask<'_> {
+        HostMask::new(&self.nick, &self.user, &self.cloak)
     }
 }
 
@@ -91,6 +98,7 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
 
         Ok(Self {
             host,
+            cloak: host.ip().to_string(),
             nick,
             user,
             mode: UserMode::empty(),

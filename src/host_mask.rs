@@ -1,7 +1,16 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
+    fmt::{Display, Formatter},
     io::{Error, ErrorKind},
+    str::FromStr,
+};
+
+use sqlx::{
+    database::{HasArguments, HasValueRef},
+    encode::IsNull,
+    error::BoxDynError,
+    Database, Decode, Encode, Type,
 };
 
 /// A map of `HostMask`s to `T`, implemented as a prefix trie with three
@@ -20,6 +29,11 @@ impl<T> HostMaskMap<T> {
             children: HashMap::new(),
             matcher: Matcher::Nick,
         }
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.children.is_empty()
     }
 
     /// Inserts a new mask into the tree with the given `value`. This function operates
@@ -83,6 +97,18 @@ impl<T> HostMaskMap<T> {
 
         if let Some(wildcard) = self.children.get(&Key::Wildcard) {
             out = traverse(out, wildcard, &next_mask);
+        }
+
+        out
+    }
+}
+
+impl<'a, T> FromIterator<(HostMask<'a>, T)> for HostMaskMap<T> {
+    fn from_iter<I: IntoIterator<Item = (HostMask<'a>, T)>>(iter: I) -> Self {
+        let mut out = Self::new();
+
+        for (k, v) in iter {
+            out.insert(&k, v);
         }
 
         out
@@ -153,6 +179,7 @@ impl Matcher {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct HostMask<'a> {
     nick: Cow<'a, str>,
     username: Cow<'a, str>,
@@ -161,6 +188,15 @@ pub struct HostMask<'a> {
 
 impl<'a> HostMask<'a> {
     #[must_use]
+    pub const fn new(nick: &'a str, username: &'a str, host: &'a str) -> Self {
+        Self {
+            nick: Cow::Borrowed(nick),
+            username: Cow::Borrowed(username),
+            host: Cow::Borrowed(host),
+        }
+    }
+
+    #[must_use]
     pub fn as_borrowed(&'a self) -> Self {
         Self {
             nick: Cow::Borrowed(self.nick.as_ref()),
@@ -168,18 +204,71 @@ impl<'a> HostMask<'a> {
             host: Cow::Borrowed(self.host.as_ref()),
         }
     }
+
+    #[must_use]
+    pub fn into_owned(self) -> HostMask<'static> {
+        HostMask {
+            nick: Cow::Owned(self.nick.into_owned()),
+            username: Cow::Owned(self.username.into_owned()),
+            host: Cow::Owned(self.host.into_owned()),
+        }
+    }
+}
+
+impl Display for HostMask<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}!{}@{}", self.nick, self.username, self.host)
+    }
+}
+
+impl<'a, DB> Type<DB> for HostMask<'a>
+where
+    String: Type<DB>,
+    DB: Database,
+{
+    fn type_info() -> DB::TypeInfo {
+        String::type_info()
+    }
+
+    fn compatible(ty: &DB::TypeInfo) -> bool {
+        String::compatible(ty)
+    }
+}
+
+impl<'a, 'q, DB> Encode<'q, DB> for HostMask<'a>
+where
+    String: Encode<'q, DB>,
+    DB: Database,
+{
+    fn encode_by_ref(&self, buf: &mut <DB as HasArguments<'q>>::ArgumentBuffer) -> IsNull {
+        self.to_string().encode(buf)
+    }
+}
+
+impl<'r, DB> Decode<'r, DB> for HostMask<'static>
+where
+    &'r str: Decode<'r, DB>,
+    DB: Database,
+{
+    fn decode(value: <DB as HasValueRef<'r>>::ValueRef) -> Result<Self, BoxDynError> {
+        Ok(<&'r str as Decode<'r, DB>>::decode(value)?.parse()?)
+    }
+}
+
+impl FromStr for HostMask<'static> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        HostMask::try_from(s).map(HostMask::into_owned)
+    }
 }
 
 impl<'a> TryFrom<&'a str> for HostMask<'a> {
     type Error = Error;
 
     fn try_from(rest: &'a str) -> Result<Self, Self::Error> {
-        let (nick, rest) = rest
-            .split_once('!')
-            .ok_or_else(|| Error::new(ErrorKind::Other, "missing nick separator"))?;
-        let (username, host) = rest
-            .split_once('@')
-            .ok_or_else(|| Error::new(ErrorKind::Other, "missing host separator"))?;
+        let (nick, rest) = rest.split_once('!').unwrap_or((rest, ""));
+        let (username, host) = rest.split_once('@').unwrap_or(("*", "*"));
 
         let is_invalid = |v: &str| {
             (v.contains('*') && !v.ends_with('*'))

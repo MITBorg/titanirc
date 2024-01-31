@@ -21,7 +21,8 @@ use crate::{
         },
     },
     client::Client,
-    connection::{Capability, InitiatedConnection, UserId},
+    connection::{Capability, InitiatedConnection},
+    host_mask::{HostMask, HostMaskMap},
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
         ChannelKickUser, ChannelMemberList, ChannelMessage, ChannelPart, ChannelSetMode,
@@ -43,7 +44,7 @@ pub struct ChannelId(pub i64);
 pub struct Channel {
     pub name: String,
     pub server: Addr<Server>,
-    pub permissions: HashMap<UserId, Permission>,
+    pub permissions: HostMaskMap<Permission>,
     pub clients: HashMap<Addr<Client>, InitiatedConnection>,
     pub topic: Option<CurrentChannelTopic>,
     pub persistence: Addr<Persistence>,
@@ -95,10 +96,12 @@ impl Supervised for Channel {}
 impl Channel {
     /// Grabs the user's permissions from the permission cache, defaulting to `Normal`.
     #[must_use]
-    pub fn get_user_permissions(&self, user_id: UserId) -> Permission {
+    pub fn get_user_permissions(&self, host_mask: &HostMask<'_>) -> Permission {
         self.permissions
-            .get(&user_id)
+            .get(host_mask)
+            .into_iter()
             .copied()
+            .max()
             .unwrap_or(Permission::Normal)
     }
 }
@@ -139,7 +142,7 @@ impl Handler<FetchUserPermission> for Channel {
     type Result = MessageResult<FetchUserPermission>;
 
     fn handle(&mut self, msg: FetchUserPermission, _ctx: &mut Self::Context) -> Self::Result {
-        MessageResult(self.get_user_permissions(msg.user))
+        MessageResult(self.get_user_permissions(&msg.host_mask))
     }
 }
 
@@ -166,7 +169,10 @@ impl Handler<ChannelMessage> for Channel {
             return;
         };
 
-        if !self.get_user_permissions(sender.user_id).can_chatter() {
+        if !self
+            .get_user_permissions(&sender.to_host_mask())
+            .can_chatter()
+        {
             msg.client.do_send(Broadcast {
                 message: Message {
                     tags: None,
@@ -251,15 +257,22 @@ impl Handler<ChannelSetMode> for Channel {
             };
 
             if let Ok(user_mode) = Permission::try_from(channel_mode) {
-                let Some(affected_nick) = arg else {
+                let Some(affected_mask) = arg else {
+                    // TODO: return error to caller
                     error!("No user given");
+                    continue;
+                };
+
+                let Ok(affected_mask) = HostMask::try_from(affected_mask.as_str()) else {
+                    // TODO: return error to caller
+                    error!("Invalid mask");
                     continue;
                 };
 
                 ctx.notify(SetUserMode {
                     requester: client.clone(),
                     add,
-                    affected_nick,
+                    affected_mask: affected_mask.into_owned(),
                     user_mode,
                     span: Span::current(),
                 });
@@ -280,20 +293,10 @@ impl Handler<SetUserMode> for Channel {
 
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: SetUserMode, ctx: &mut Self::Context) -> Self::Result {
-        let permissions = self.get_user_permissions(msg.requester.user_id);
-
-        // TODO: this should allow setting perms not currently in the channel
-        let Some((_, affected_user)) = self
-            .clients
-            .iter()
-            .find(|(_, connection)| connection.nick == msg.affected_nick)
-        else {
-            error!("Unknown user to set perms on");
-            return;
-        };
+        let permissions = self.get_user_permissions(&msg.requester.to_host_mask());
 
         // grab the permissions of the user we're trying to affect
-        let affected_user_perms = self.get_user_permissions(affected_user.user_id);
+        let affected_user_perms = self.get_user_permissions(&msg.affected_mask);
 
         // calculate the new permissions that should be set on the user
         let new_affected_user_perms = if msg.add {
@@ -319,35 +322,28 @@ impl Handler<SetUserMode> for Channel {
 
         // persist the permissions change both locally and to the database
         self.permissions
-            .insert(affected_user.user_id, new_affected_user_perms);
+            .insert(&msg.affected_mask, new_affected_user_perms);
         self.persistence.do_send(SetUserChannelPermissions {
             channel_id: self.channel_id,
-            user_id: affected_user.user_id,
+            mask: msg.affected_mask.clone().into_owned(),
             permissions: new_affected_user_perms,
         });
 
-        // broadcast the change for all nicks that the affected user is connected with
-        let all_connected_for_user_id = self
-            .clients
-            .values()
-            .filter(|connection| connection.user_id == affected_user.user_id);
-        for connection in all_connected_for_user_id {
-            let Some(mode) = msg
-                .user_mode
-                .into_mode(msg.add, connection.nick.to_string())
-            else {
-                continue;
-            };
+        let Some(mode) = msg
+            .user_mode
+            .into_mode(msg.add, msg.affected_mask.to_string())
+        else {
+            return;
+        };
 
-            ctx.notify(Broadcast {
-                message: Message {
-                    tags: None,
-                    prefix: Some(connection.to_nick()),
-                    command: Command::ChannelMODE(self.name.to_string(), vec![mode.clone()]),
-                },
-                span: Span::current(),
-            });
-        }
+        ctx.notify(Broadcast {
+            message: Message {
+                tags: None,
+                prefix: Some(msg.requester.to_nick()),
+                command: Command::ChannelMODE(self.name.to_string(), vec![mode]),
+            },
+            span: Span::current(),
+        });
     }
 }
 
@@ -383,8 +379,10 @@ impl Handler<ChannelJoin> for Channel {
 
         let mut permissions = self
             .permissions
-            .get(&msg.connection.user_id)
+            .get(&msg.connection.to_host_mask())
+            .into_iter()
             .copied()
+            .max()
             .unwrap_or(Permission::Normal);
 
         if !permissions.can_join() {
@@ -405,11 +403,13 @@ impl Handler<ChannelJoin> for Channel {
             // the first person to ever join the channel should get founder permissions
             permissions = Permission::Founder;
 
-            self.permissions.insert(msg.connection.user_id, permissions);
+            let username_mask = HostMask::new("*", &msg.connection.user, "*");
+
+            self.permissions.insert(&username_mask, permissions);
 
             self.persistence.do_send(SetUserChannelPermissions {
                 channel_id: self.channel_id,
-                user_id: msg.connection.user_id,
+                mask: username_mask.into_owned(),
                 permissions,
             });
         }
@@ -478,7 +478,7 @@ impl Handler<ChannelUpdateTopic> for Channel {
         debug!(msg.topic, "User is attempting to update channel topic");
 
         if !self
-            .get_user_permissions(client_info.user_id)
+            .get_user_permissions(&client_info.to_host_mask())
             .can_set_topic()
         {
             error!("User attempted to set channel topic without privileges");
@@ -517,7 +517,7 @@ impl Handler<ChannelKickUser> for Channel {
             return;
         };
 
-        if !self.get_user_permissions(kicker.user_id).can_kick() {
+        if !self.get_user_permissions(&kicker.to_host_mask()).can_kick() {
             error!("Kicker can not kick people from the channel");
             msg.client.do_send(Broadcast {
                 message: MissingPrivileges(kicker.to_nick(), self.name.to_string()).into_message(),
@@ -700,7 +700,7 @@ pub struct CurrentChannelTopic {
 pub struct SetUserMode {
     requester: InitiatedConnection,
     add: bool,
-    affected_nick: String,
+    affected_mask: HostMask<'static>,
     user_mode: Permission,
     span: Span,
 }

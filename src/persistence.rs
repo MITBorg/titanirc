@@ -1,6 +1,6 @@
 pub mod events;
 
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use actix::{AsyncContext, Context, Handler, ResponseFuture, WrapFuture};
 use chrono::{DateTime, TimeZone, Utc};
@@ -10,6 +10,7 @@ use tracing::instrument;
 use crate::{
     channel::permissions::Permission,
     connection::UserId,
+    host_mask::{HostMask, HostMaskMap},
     messages::MessageKind,
     persistence::events::{
         ChannelCreated, ChannelJoined, ChannelMessage, ChannelParted,
@@ -91,13 +92,12 @@ impl Handler<ChannelJoined> for Persistence {
 
         Box::pin(async move {
             sqlx::query(
-                "INSERT INTO channel_users (channel, user, permissions, in_channel)
-                 VALUES (?, ?, ?, ?)
+                "INSERT INTO channel_users (channel, user, in_channel)
+                 VALUES (?, ?, ?)
                  ON CONFLICT(channel, user) DO UPDATE SET in_channel = excluded.in_channel",
             )
             .bind(msg.channel_id.0)
             .bind(msg.user_id.0)
-            .bind(0i32)
             .bind(true)
             .execute(&conn)
             .await
@@ -131,7 +131,7 @@ impl Handler<ChannelParted> for Persistence {
 }
 
 impl Handler<FetchAllUserChannelPermissions> for Persistence {
-    type Result = ResponseFuture<HashMap<UserId, Permission>>;
+    type Result = ResponseFuture<HostMaskMap<Permission>>;
 
     fn handle(
         &mut self,
@@ -141,9 +141,9 @@ impl Handler<FetchAllUserChannelPermissions> for Persistence {
         let conn = self.database.clone();
 
         Box::pin(async move {
-            sqlx::query_as::<_, (UserId, Permission)>(
-                "SELECT user, permissions
-                 FROM channel_users
+            sqlx::query_as::<_, (HostMask, Permission)>(
+                "SELECT mask, permissions
+                 FROM channel_permissions
                  WHERE channel = ?",
             )
             .bind(msg.channel_id.0)
@@ -164,14 +164,13 @@ impl Handler<SetUserChannelPermissions> for Persistence {
 
         Box::pin(async move {
             sqlx::query(
-                "UPDATE channel_users
-                 SET permissions = ?
-                 WHERE user = ?
-                   AND channel = ?",
+                "INSERT INTO channel_permissions (channel, mask, permissions)
+                 VALUES (?, ?, ?)
+                 ON CONFLICT(channel, mask) DO UPDATE SET permissions = excluded.permissions",
             )
-            .bind(msg.permissions)
-            .bind(msg.user_id.0)
             .bind(msg.channel_id.0)
+            .bind(msg.mask)
+            .bind(msg.permissions)
             .execute(&conn)
             .await
             .unwrap();
@@ -397,7 +396,7 @@ impl Handler<ReserveNick> for Persistence {
 pub async fn truncate_seen_messages(db: sqlx::Pool<sqlx::Any>, max_replay_since: Duration) {
     // fetch the minimum last seen message by channel
     let messages = sqlx::query_as::<_, (i64, i64)>(
-        "SELECT channel, MIN(last_seen_message_timestamp)
+        "SELECT channel, COALESCE(MIN(last_seen_message_timestamp), 0)
          FROM channel_users
          GROUP BY channel",
     )

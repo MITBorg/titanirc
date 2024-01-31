@@ -270,19 +270,17 @@ impl Handler<ConnectedChannels> for Client {
     #[instrument(parent = &msg.span, skip_all)]
     fn handle(&mut self, msg: ConnectedChannels, _ctx: &mut Self::Context) -> Self::Result {
         let span = Span::current();
-        let user_id = self.connection.user_id;
+        let host_mask = self.connection.to_host_mask().into_owned();
 
         let fut = self.channels.iter().map(move |(channel_name, handle)| {
             let span = span.clone();
             let channel_name = channel_name.to_string();
             let handle = handle.clone();
+            let host_mask = host_mask.clone();
 
             async move {
                 let permission = handle
-                    .send(FetchUserPermission {
-                        span,
-                        user: user_id,
-                    })
+                    .send(FetchUserPermission { span, host_mask })
                     .await
                     .unwrap();
 

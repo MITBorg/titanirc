@@ -32,13 +32,20 @@ CREATE TABLE channel_messages (
 CREATE TABLE channel_users (
     channel INT NOT NULL,
     user INT NOT NULL,
-    permissions INT NOT NULL DEFAULT 0,
     in_channel BOOLEAN DEFAULT false,
     last_seen_message_timestamp INT,
     FOREIGN KEY(user) REFERENCES users(id),
     FOREIGN KEY(channel) REFERENCES channels(id),
     -- FOREIGN KEY(channel, last_seen_message_timestamp) REFERENCES channel_messages(channel, timestamp)
     PRIMARY KEY(channel, user)
+);
+
+CREATE TABLE channel_permissions (
+    channel INT NOT NULL,
+    mask VARCHAR(255),
+    permissions INT NOT NULL DEFAULT 0,
+    FOREIGN KEY(channel) REFERENCES channels(id),
+    PRIMARY KEY(channel, mask)
 );
 
 CREATE TABLE private_messages (

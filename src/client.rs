@@ -24,9 +24,10 @@ use crate::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelInvite, ChannelJoin,
         ChannelKickUser, ChannelList, ChannelMemberList, ChannelMessage, ChannelPart,
         ChannelSetMode, ChannelUpdateTopic, ClientAway, ConnectedChannels, FetchClientDetails,
-        FetchUserPermission, FetchWhoList, FetchWhois, ForceDisconnect, KillUser, MessageKind,
-        PrivateMessage, ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers,
-        UserKickedFromChannel, UserNickChange, UserNickChangeInternal, Wallops,
+        FetchUserPermission, FetchWhoList, FetchWhois, ForceDisconnect, Gline, KillUser, ListGline,
+        MessageKind, PrivateMessage, RemoveGline, ServerAdminInfo, ServerDisconnect,
+        ServerFetchMotd, ServerListUsers, UserKickedFromChannel, UserNickChange,
+        UserNickChangeInternal, Wallops,
     },
     persistence::{
         events::{
@@ -35,6 +36,7 @@ use crate::{
         },
         Persistence,
     },
+    proto::LocalCommand,
     server::{
         response::{IntoProtocol, WhoList},
         Server,
@@ -941,21 +943,55 @@ impl StreamHandler<Result<irc_proto::Message, ProtocolError>> for Client {
             Command::BATCH(_, _, _) => {}
             Command::CHGHOST(_, _) => {}
             Command::Response(_, _) => {}
-            v => self.writer.write(Message {
-                tags: None,
-                prefix: Some(Prefix::new_from_str(&self.connection.nick)),
-                command: Command::Response(
-                    Response::ERR_UNKNOWNCOMMAND,
-                    vec![
-                        String::from(&v)
-                            .split_whitespace()
-                            .next()
-                            .unwrap_or_default()
-                            .to_string(),
-                        "Unknown command".to_string(),
-                    ],
-                ),
-            }),
+            Command::Raw(command, args) => self.handle_custom_command(ctx, command, args),
+            _ => {
+                for m in crate::proto::Error::UnknownCommand.into_messages(&self.connection.nick) {
+                    self.writer.write(m);
+                }
+            }
+        }
+    }
+}
+
+impl Client {
+    fn handle_custom_command(
+        &mut self,
+        ctx: &mut Context<Self>,
+        command: String,
+        args: Vec<String>,
+    ) {
+        match LocalCommand::try_from((command, args)) {
+            Ok(LocalCommand::Gline(mask, duration, reason))
+                if self.connection.mode.contains(UserMode::OPER) =>
+            {
+                self.server_send_map_write(
+                    ctx,
+                    Gline {
+                        requester: self.connection.clone(),
+                        mask,
+                        duration,
+                        reason,
+                    },
+                );
+            }
+            Ok(LocalCommand::RemoveGline(mask))
+                if self.connection.mode.contains(UserMode::OPER) =>
+            {
+                self.server_send_map_write(ctx, RemoveGline { mask });
+            }
+            Ok(LocalCommand::ListGline) if self.connection.mode.contains(UserMode::OPER) => {
+                self.server_send_map_write(ctx, ListGline);
+            }
+            Err(e) => {
+                for m in e.into_messages(&self.connection.nick) {
+                    self.writer.write(m);
+                }
+            }
+            _ => {
+                for m in crate::proto::Error::UnknownCommand.into_messages(&self.connection.nick) {
+                    self.writer.write(m);
+                }
+            }
         }
     }
 }

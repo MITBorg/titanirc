@@ -14,6 +14,7 @@ pub mod host_mask;
 pub mod keys;
 pub mod messages;
 pub mod persistence;
+pub mod proto;
 pub mod server;
 
 pub const SERVER_NAME: &str = "my.cool.server";

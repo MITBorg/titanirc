@@ -18,12 +18,14 @@ chrono = "0.4"
 clap = { version = "4.1", features = ["cargo", "derive", "std", "suggestions", "color"] }
 futures = "0.3"
 hex = "0.4"
+humantime = "2.1"
 hickory-resolver = { version = "0.24", features = ["tokio-runtime", "system-config"] }
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde-humantime = "0.1"
 sha2 = "0.10    "
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any"] }
+thiserror = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 toml = "0.8"

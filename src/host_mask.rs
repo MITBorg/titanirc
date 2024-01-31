@@ -106,6 +106,35 @@ impl<T> HostMaskMap<T> {
         }
     }
 
+    pub fn remove(&mut self, mask: &HostMask<'_>) -> bool {
+        let mut next_mask = mask.as_borrowed();
+
+        let key = match self.matcher {
+            Matcher::Nick => take_next_char(&mask.nick, &mut next_mask.nick),
+            Matcher::Username => take_next_char(&mask.username, &mut next_mask.username),
+            Matcher::Host => take_next_char(&mask.host, &mut next_mask.host),
+        };
+
+        let key = match key {
+            Some('*') => Key::Wildcard,
+            Some(c) => Key::Char(c),
+            None => Key::EndOfString,
+        };
+
+        if key.is_end() && self.matcher.next().is_none() {
+            self.children.remove(&key).is_some()
+        } else {
+            let Some(node) = self.children.get_mut(&key) else {
+                return false;
+            };
+
+            match node {
+                Node::Match(_) => unreachable!("stored hostmask has less parts than a!b@c"),
+                Node::Inner(map) => map.remove(&next_mask),
+            }
+        }
+    }
+
     /// Fetches all the matches within the trie that match the input. This function returns
     /// any exact matches as well as any wildcard matches. This function operates in `O(m)`
     /// average time complexity.
@@ -219,7 +248,7 @@ impl Matcher {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostMask<'a> {
     nick: Cow<'a, str>,
     username: Cow<'a, str>,
@@ -335,6 +364,36 @@ impl<'a> TryFrom<&'a str> for HostMask<'a> {
 #[cfg(test)]
 mod test {
     use crate::host_mask::{HostMask, HostMaskMap};
+
+    #[test]
+    fn from_iter() {
+        let map = [
+            ("aaa*!bbb@cccc".try_into().unwrap(), 10),
+            ("aaab!ccc@dddd".try_into().unwrap(), 10),
+        ]
+        .into_iter()
+        .collect::<HostMaskMap<_>>();
+
+        let retrieved = map.get(&"aaaa!bbb@cccc".try_into().unwrap());
+        assert_eq!(retrieved.len(), 1);
+        assert_eq!(*retrieved[0], 10);
+
+        let retrieved = map.get(&"aaab!ccc@dddd".try_into().unwrap());
+        assert_eq!(retrieved.len(), 1);
+        assert_eq!(*retrieved[0], 10);
+    }
+
+    #[test]
+    fn iter() {
+        let mut map = HostMaskMap::new();
+        map.insert(&"aaaa!*@*".try_into().unwrap(), 30);
+        map.insert(&"bbbb!a@b".try_into().unwrap(), 40);
+
+        let retrieved = map.iter().collect::<Vec<_>>();
+        assert_eq!(retrieved.len(), 2);
+        assert!(retrieved.contains(&("aaaa!*@*".to_string(), &30)));
+        assert!(retrieved.contains(&("bbbb!a@b".to_string(), &40)));
+    }
 
     #[test]
     fn wildcard_middle_of_string_unsupported() {

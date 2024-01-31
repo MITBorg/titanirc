@@ -1,12 +1,13 @@
 pub mod response;
 
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, collections::HashMap, time::Duration};
 
 use actix::{
-    Actor, Addr, AsyncContext, Context, Handler, MessageResult, ResponseFuture, Supervised,
-    Supervisor,
+    Actor, ActorContext, ActorFuture, ActorFutureExt, Addr, AsyncContext, Context, Handler,
+    MessageResult, ResponseFuture, Supervised, Supervisor, WrapFuture,
 };
 use actix_rt::Arbiter;
+use chrono::Utc;
 use clap::crate_version;
 use futures::{
     future,
@@ -16,23 +17,28 @@ use futures::{
 use irc_proto::{Command, Message, Prefix, Response};
 use rand::seq::SliceRandom;
 use tokio_stream::StreamExt;
-use tracing::{debug, instrument, warn, Span};
+use tracing::{debug, error, info, instrument, warn, Span};
 
 use crate::{
     channel::{permissions::Permission, Channel, ChannelId},
     client::Client,
     config::Config,
     connection::{InitiatedConnection, UserMode},
-    host_mask::HostMaskMap,
+    host_mask::{HostMask, HostMaskMap},
     messages::{
         Broadcast, ChannelFetchTopic, ChannelFetchWhoList, ChannelJoin, ChannelList,
         ChannelMemberList, ClientAway, ConnectedChannels, FetchClientByNick, FetchWhoList,
-        FetchWhois, ForceDisconnect, KillUser, MessageKind, PrivateMessage, ServerAdminInfo,
-        ServerDisconnect, ServerFetchMotd, ServerListUsers, UserConnected, UserNickChange,
-        UserNickChangeInternal, Wallops,
+        FetchWhois, ForceDisconnect, Gline, KillUser, ListGline, MessageKind, PrivateMessage,
+        RemoveGline, ServerAdminInfo, ServerDisconnect, ServerFetchMotd, ServerListUsers,
+        UserConnected, UserNickChange, UserNickChangeInternal, ValidateConnection, Wallops,
     },
-    persistence::Persistence,
-    server::response::{AdminInfo, IntoProtocol, ListUsers, Motd, NoSuchNick, WhoList, Whois},
+    persistence::{
+        events::{ServerBan, ServerRemoveBan},
+        Persistence,
+    },
+    server::response::{
+        AdminInfo, ConnectionValidated, IntoProtocol, ListUsers, Motd, NoSuchNick, WhoList, Whois,
+    },
     SERVER_NAME,
 };
 
@@ -44,6 +50,7 @@ pub struct Server {
     pub max_clients: usize,
     pub config: Config,
     pub persistence: Addr<Persistence>,
+    pub bans: HostMaskMap<response::ServerBan>,
 }
 
 impl Supervised for Server {}
@@ -62,6 +69,24 @@ impl Handler<UserNickChangeInternal> for Server {
         debug!(%msg.old_nick, %msg.new_nick, "User is updating nick for another user");
 
         client.do_send(msg);
+    }
+}
+
+impl Handler<ValidateConnection> for Server {
+    type Result = MessageResult<ValidateConnection>;
+
+    #[allow(clippy::option_if_let_else)]
+    fn handle(&mut self, msg: ValidateConnection, _ctx: &mut Self::Context) -> Self::Result {
+        MessageResult(
+            if let Some(ban) = self.bans.get(&msg.0.to_host_mask()).into_iter().next() {
+                ConnectionValidated::Reject(format!(
+                    "G-lined: {}",
+                    ban.reason.as_deref().unwrap_or("no reason given")
+                ))
+            } else {
+                ConnectionValidated::Allowed
+            },
+        )
     }
 }
 
@@ -472,6 +497,124 @@ impl Handler<PrivateMessage> for Server {
     }
 }
 
+impl Handler<Gline> for Server {
+    type Result = ();
+
+    fn handle(&mut self, msg: Gline, _ctx: &mut Self::Context) -> Self::Result {
+        let created = Utc::now();
+        let expires = msg.duration.map(|v| created + v);
+
+        // TODO: return ack msg
+        self.bans.insert(
+            &msg.mask,
+            response::ServerBan {
+                mask: msg.mask.clone(),
+                requester: msg.requester.user.to_string(),
+                reason: msg.reason.clone(),
+                created,
+                expires,
+            },
+        );
+
+        // TODO: stop looping over all users
+        let comment = format!(
+            "G-lined: {}",
+            msg.reason.as_deref().unwrap_or("no reason given")
+        );
+        for (handle, user) in &self.clients {
+            if !self.bans.get(&user.to_host_mask()).is_empty() {
+                handle.do_send(KillUser {
+                    span: Span::current(),
+                    killer: msg.requester.nick.to_string(),
+                    comment: comment.to_string(),
+                    killed: user.nick.to_string(),
+                });
+            }
+        }
+
+        self.persistence.do_send(ServerBan {
+            mask: msg.mask,
+            requester: msg.requester.user_id,
+            reason: msg.reason.unwrap_or_default(),
+            created,
+            expires,
+        });
+    }
+}
+
+impl Handler<RemoveGline> for Server {
+    type Result = ();
+
+    fn handle(&mut self, msg: RemoveGline, _ctx: &mut Self::Context) -> Self::Result {
+        // TODO: return ack msg
+        self.bans.remove(&msg.mask);
+
+        self.persistence.do_send(ServerRemoveBan { mask: msg.mask });
+    }
+}
+
+impl Handler<ListGline> for Server {
+    type Result = MessageResult<ListGline>;
+
+    fn handle(&mut self, _msg: ListGline, _ctx: &mut Self::Context) -> Self::Result {
+        MessageResult(self.bans.iter().map(|(_, v)| v.clone()).collect())
+    }
+}
+
 impl Actor for Server {
     type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.wait(self.load_server_ban_list());
+        ctx.run_interval(Duration::from_secs(30), Self::remove_expired_bans);
+    }
+}
+
+impl Server {
+    fn load_server_ban_list(&mut self) -> impl ActorFuture<Self, Output = ()> + 'static {
+        self.persistence
+            .send(crate::persistence::events::ServerListBan)
+            .into_actor(self)
+            .map(|res, this, ctx| match res {
+                Ok(bans) => {
+                    this.bans = bans
+                        .into_iter()
+                        .map(|v| (v.mask.clone(), v.into()))
+                        .collect();
+                }
+                Err(error) => {
+                    error!(%error, "Failed to fetch bans");
+                    ctx.terminate();
+                }
+            })
+    }
+
+    fn remove_expired_bans(&mut self, _ctx: &mut Context<Self>) {
+        let mut expired = Vec::new();
+
+        for (mask, ban) in self.bans.iter() {
+            let Some(expires_at) = ban.expires else {
+                continue;
+            };
+
+            if expires_at > Utc::now() {
+                continue;
+            }
+
+            let Ok(mask) = HostMask::try_from(mask.as_str()) else {
+                continue;
+            };
+
+            expired.push(mask.into_owned());
+        }
+
+        for mask in expired {
+            info!("Removing expired ban on {mask}");
+
+            self.bans.remove(&mask);
+            self.persistence.do_send(ServerRemoveBan {
+                mask: mask.into_owned(),
+            });
+        }
+    }
 }

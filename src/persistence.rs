@@ -15,8 +15,8 @@ use crate::{
     persistence::events::{
         ChannelCreated, ChannelJoined, ChannelMessage, ChannelParted,
         FetchAllUserChannelPermissions, FetchUnseenChannelMessages, FetchUnseenPrivateMessages,
-        FetchUserChannels, FetchUserIdByNick, PrivateMessage, ReserveNick,
-        SetUserChannelPermissions,
+        FetchUserChannels, FetchUserIdByNick, PrivateMessage, ReserveNick, ServerBan,
+        ServerListBan, ServerListBanEntry, ServerRemoveBan, SetUserChannelPermissions,
     },
 };
 
@@ -386,6 +386,71 @@ impl Handler<ReserveNick> for Persistence {
             .unwrap();
 
             owning_user == msg.user_id.0
+        })
+    }
+}
+
+impl Handler<ServerBan> for Persistence {
+    type Result = ResponseFuture<()>;
+
+    fn handle(&mut self, msg: ServerBan, _ctx: &mut Self::Context) -> Self::Result {
+        let database = self.database.clone();
+
+        Box::pin(async move {
+            sqlx::query(
+                "INSERT INTO server_bans
+                 (mask, requester, reason, created_timestamp, expires_timestamp)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(msg.mask)
+            .bind(msg.requester)
+            .bind(msg.reason)
+            .bind(msg.created.timestamp_nanos_opt().unwrap())
+            .bind(msg.expires.map(|v| v.timestamp_nanos_opt().unwrap()))
+            .execute(&database)
+            .await
+            .unwrap();
+        })
+    }
+}
+
+impl Handler<ServerRemoveBan> for Persistence {
+    type Result = ResponseFuture<()>;
+
+    fn handle(&mut self, msg: ServerRemoveBan, _ctx: &mut Self::Context) -> Self::Result {
+        let database = self.database.clone();
+
+        Box::pin(async move {
+            sqlx::query("DELETE FROM server_bans WHERE mask = ?")
+                .bind(msg.mask)
+                .execute(&database)
+                .await
+                .unwrap();
+        })
+    }
+}
+
+impl Handler<ServerListBan> for Persistence {
+    type Result = ResponseFuture<Vec<ServerListBanEntry>>;
+
+    fn handle(&mut self, _msg: ServerListBan, _ctx: &mut Self::Context) -> Self::Result {
+        let database = self.database.clone();
+
+        Box::pin(async move {
+            sqlx::query_as(
+                "SELECT
+                   users.username AS requester,
+                   server_bans.mask,
+                   server_bans.reason,
+                   server_bans.created_timestamp,
+                   server_bans.expires_timestamp
+                 FROM server_bans
+                 INNER JOIN users
+                   ON server_bans.requester = users.id",
+            )
+            .fetch_all(&database)
+            .await
+            .unwrap()
         })
     }
 }

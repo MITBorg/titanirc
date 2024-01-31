@@ -17,8 +17,14 @@ use irc_proto::{Command, IrcCodec, Message};
 use rand::seq::SliceRandom;
 use sqlx::migrate::Migrator;
 use titanircd::{
-    client::Client, config::Args, connection, keys::Keys, messages::UserConnected,
-    persistence::Persistence, server::Server,
+    client::Client,
+    config::Args,
+    connection,
+    host_mask::HostMaskMap,
+    keys::Keys,
+    messages::{UserConnected, ValidateConnection},
+    persistence::Persistence,
+    server::{response::ConnectionValidated, Server},
 };
 use tokio::{
     io::WriteHalf,
@@ -86,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
         config: opts.config,
         persistence,
         max_clients: 0,
+        bans: HostMaskMap::new(),
     });
 
     let listener = TcpListener::bind(listen_address).await?;
@@ -164,6 +171,17 @@ async fn start_tcp_acceptor_loop(
                     return;
                 }
             };
+
+            match server.send(ValidateConnection(connection.clone())).await.unwrap() {
+                ConnectionValidated::Allowed => {}
+                ConnectionValidated::Reject(reason) => {
+                    let command = Command::ERROR(reason.to_string());
+                    if let Err(error) = write.send(Message { tags: None, prefix: None, command, }).await {
+                        error!(%error, "Failed to send error message to client, forcefully closing connection.");
+                    }
+                    return;
+                }
+            }
 
             // spawn the client's actor
             let handle = {

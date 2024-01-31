@@ -1,8 +1,10 @@
+use chrono::{DateTime, TimeZone, Utc};
 use irc_proto::{Command, Message, Prefix, Response};
 use itertools::Itertools;
 
 use crate::{
-    channel::permissions::Permission, connection::InitiatedConnection, server::Server, SERVER_NAME,
+    channel::permissions::Permission, connection::InitiatedConnection, host_mask::HostMask,
+    persistence::events::ServerListBanEntry, server::Server, SERVER_NAME,
 };
 
 pub struct Whois {
@@ -396,6 +398,58 @@ pub struct ChannelListItem {
     pub topic: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ServerBan {
+    pub mask: HostMask<'static>,
+    pub requester: String,
+    pub reason: Option<String>,
+    pub created: DateTime<Utc>,
+    pub expires: Option<DateTime<Utc>>,
+}
+
+impl From<ServerListBanEntry> for ServerBan {
+    fn from(value: ServerListBanEntry) -> Self {
+        Self {
+            mask: value.mask,
+            requester: value.requester,
+            reason: Some(value.reason).filter(|v| !v.is_empty()),
+            created: Utc.timestamp_nanos(value.created_timestamp),
+            expires: value.expires_timestamp.map(|v| Utc.timestamp_nanos(v)),
+        }
+    }
+}
+
+impl IntoProtocol for ServerBan {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
+        vec![Message {
+            tags: None,
+            prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+            command: Command::Raw(
+                "216".to_string(),
+                vec![
+                    for_user.to_string(),
+                    format!(
+                        "{} by {} ({}), created {}, expires {}",
+                        self.mask,
+                        self.requester,
+                        self.reason.as_deref().unwrap_or("no reason given"),
+                        self.created,
+                        self.expires
+                            .map(|v| v.to_string())
+                            .as_deref()
+                            .unwrap_or("never")
+                    ),
+                ],
+            ),
+        }]
+    }
+}
+
+pub enum ConnectionValidated {
+    Allowed,
+    Reject(String),
+}
+
 pub trait IntoProtocol {
     #[must_use]
     fn into_messages(self, for_user: &str) -> Vec<Message>;
@@ -423,5 +477,13 @@ where
             Ok(v) => v.into_messages(for_user),
             Err(e) => e.into_messages(for_user),
         }
+    }
+}
+
+impl<T: IntoProtocol> IntoProtocol for Vec<T> {
+    fn into_messages(self, for_user: &str) -> Vec<Message> {
+        self.into_iter()
+            .flat_map(|v| v.into_messages(for_user))
+            .collect()
     }
 }

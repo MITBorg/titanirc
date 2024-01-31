@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use actix::{Addr, Message};
 use anyhow::Result;
 use irc_proto::{ChannelMode, Mode};
@@ -171,6 +173,29 @@ pub struct ChannelSetMode {
     pub client: Addr<Client>,
     pub modes: Vec<Mode<ChannelMode>>,
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Gline {
+    pub requester: InitiatedConnection,
+    pub mask: HostMask<'static>,
+    pub duration: Option<Duration>,
+    pub reason: Option<String>,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct RemoveGline {
+    pub mask: HostMask<'static>,
+}
+
+#[derive(Message)]
+#[rtype(result = "Vec<super::server::response::ServerBan>")]
+pub struct ListGline;
+
+#[derive(Message)]
+#[rtype(result = "super::server::response::ConnectionValidated")]
+pub struct ValidateConnection(pub InitiatedConnection);
 
 /// Attempts to kick a user from a channel.
 #[derive(Message)]

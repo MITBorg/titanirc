@@ -1,5 +1,6 @@
 use actix::Message;
 use chrono::{DateTime, Utc};
+use sqlx::FromRow;
 use tracing::Span;
 
 use crate::{
@@ -97,4 +98,35 @@ pub struct FetchUnseenChannelMessages {
 pub struct ReserveNick {
     pub user_id: UserId,
     pub nick: String,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ServerBan {
+    pub mask: HostMask<'static>,
+    pub requester: UserId,
+    pub reason: String,
+    pub created: DateTime<Utc>,
+    pub expires: Option<DateTime<Utc>>,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ServerRemoveBan {
+    pub mask: HostMask<'static>,
+}
+
+#[derive(Message)]
+#[rtype(result = "Vec<ServerListBanEntry>")]
+pub struct ServerListBan;
+
+#[derive(Message, FromRow)]
+#[rtype(result = "()")]
+pub struct ServerListBanEntry {
+    pub mask: HostMask<'static>,
+    pub requester: String,
+    pub reason: String,
+    // timestamp in nanos. todo: sqlx datetime<utc>
+    pub created_timestamp: i64,
+    pub expires_timestamp: Option<i64>,
 }

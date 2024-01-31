@@ -90,7 +90,10 @@ impl IntoProtocol for Whois {
                 conn.nick.to_string(),
                 format!(
                     "is connecting from {}@{} {}",
-                    conn.user, conn.host, conn.host
+                    conn.user,
+                    conn.resolved_host
+                        .unwrap_or_else(|| conn.host.ip().to_string()),
+                    conn.host.ip()
                 )
             ), // RPL_WHOISHOST
         ];

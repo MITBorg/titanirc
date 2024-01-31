@@ -8,6 +8,7 @@ use std::{
     io::{Error, ErrorKind},
     net::SocketAddr,
     str::FromStr,
+    time::Duration,
 };
 
 use actix::{io::FramedWrite, Actor, Addr};
@@ -15,6 +16,7 @@ use bitflags::bitflags;
 use chrono::Utc;
 use const_format::concatcp;
 use futures::{SinkExt, TryStreamExt};
+use hickory_resolver::TokioAsyncResolver;
 use irc_proto::{
     error::ProtocolError, CapSubCommand, Command, IrcCodec, Message, Prefix, Response,
 };
@@ -44,6 +46,7 @@ pub struct UserId(pub i64);
 #[derive(Default)]
 pub struct ConnectionRequest {
     host: Option<SocketAddr>,
+    resolved_host: Option<String>,
     nick: Option<String>,
     user: Option<String>,
     real_name: Option<String>,
@@ -54,6 +57,7 @@ pub struct ConnectionRequest {
 #[derive(Clone, Debug)]
 pub struct InitiatedConnection {
     pub host: SocketAddr,
+    pub resolved_host: Option<String>,
     pub cloak: String,
     pub nick: String,
     pub user: String,
@@ -87,6 +91,7 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
     fn try_from(value: ConnectionRequest) -> Result<Self, Self::Error> {
         let ConnectionRequest {
             host: Some(host),
+            resolved_host,
             nick: Some(nick),
             user: Some(user),
             real_name: Some(real_name),
@@ -99,7 +104,8 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
 
         Ok(Self {
             host,
-            cloak: format!("0{}", host.ip()),
+            resolved_host: resolved_host.clone(),
+            cloak: resolved_host.unwrap_or_else(|| "xxx".to_string()),
             nick,
             user,
             mode: UserMode::empty(),
@@ -121,6 +127,7 @@ pub async fn negotiate_client_connection(
     host: SocketAddr,
     persistence: &Addr<Persistence>,
     database: sqlx::Pool<sqlx::Any>,
+    resolver: &TokioAsyncResolver,
 ) -> Result<Option<InitiatedConnection>, ProtocolError> {
     let mut request = ConnectionRequest {
         host: Some(host),
@@ -202,6 +209,18 @@ pub async fn negotiate_client_connection(
                 warn!(?msg, "Client sent unknown command during negotiation");
             }
         };
+
+        if let Ok(Ok(v)) = tokio::time::timeout(
+            Duration::from_millis(250),
+            resolver.reverse_lookup(host.ip()),
+        )
+        .await
+        {
+            request.resolved_host = v
+                .iter()
+                .next()
+                .map(|v| v.to_utf8().trim_end_matches('.').to_string());
+        }
 
         match InitiatedConnection::try_from(std::mem::take(&mut request)) {
             Ok(v) => break Some(v),

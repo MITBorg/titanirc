@@ -17,6 +17,7 @@ const_format = "0.2"
 chrono = "0.4"
 clap = { version = "4.1", features = ["cargo", "derive", "std", "suggestions", "color"] }
 futures = "0.3"
+hickory-resolver = { version = "0.24", features = ["tokio-runtime", "system-config"] }
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde-humantime = "0.1"

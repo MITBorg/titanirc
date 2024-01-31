@@ -12,6 +12,7 @@ use actix_rt::{Arbiter, System};
 use bytes::BytesMut;
 use clap::Parser;
 use futures::SinkExt;
+use hickory_resolver::AsyncResolver;
 use irc_proto::{Command, IrcCodec, Message};
 use rand::seq::SliceRandom;
 use sqlx::migrate::Migrator;
@@ -113,6 +114,7 @@ async fn start_tcp_acceptor_loop(
     client_threads: usize,
 ) {
     let client_arbiters = Arc::new(build_arbiters(client_threads));
+    let resolver = Arc::new(AsyncResolver::tokio_from_system_conf().unwrap());
 
     while let Ok((stream, addr)) = listener.accept().await {
         let span = info_span!("connection", %addr);
@@ -124,6 +126,7 @@ async fn start_tcp_acceptor_loop(
         let server = server.clone();
         let client_arbiters = client_arbiters.clone();
         let persistence = persistence.clone();
+        let resolver = resolver.clone();
 
         actix_rt::spawn(async move {
             // split the stream into its read and write halves and setup codecs
@@ -133,7 +136,7 @@ async fn start_tcp_acceptor_loop(
 
             // ensure we have all the details required to actually connect the client to the server
             // (ie. we have a nick, user, etc)
-            let connection = match connection::negotiate_client_connection(&mut read, &mut write, addr, &persistence, database).await {
+            let connection = match connection::negotiate_client_connection(&mut read, &mut write, addr, &persistence, database, &resolver).await {
                 Ok(Some(v)) => v,
                 Ok(None) => {
                     error!("Failed to fully handshake with client, dropping connection");

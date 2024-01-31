@@ -20,6 +20,7 @@ use hickory_resolver::TokioAsyncResolver;
 use irc_proto::{
     error::ProtocolError, CapSubCommand, Command, IrcCodec, Message, Prefix, Response,
 };
+use sha2::digest::{FixedOutput, Update};
 use tokio::{
     io::{ReadHalf, WriteHalf},
     net::TcpStream,
@@ -33,6 +34,7 @@ use crate::{
         sasl::{AuthStrategy, ConnectionSuccess, SaslSuccess},
     },
     host_mask::HostMask,
+    keys::Keys,
     persistence::{events::ReserveNick, Persistence},
 };
 
@@ -46,7 +48,6 @@ pub struct UserId(pub i64);
 #[derive(Default)]
 pub struct ConnectionRequest {
     host: Option<SocketAddr>,
-    resolved_host: Option<String>,
     nick: Option<String>,
     user: Option<String>,
     real_name: Option<String>,
@@ -70,6 +71,41 @@ pub struct InitiatedConnection {
 }
 
 impl InitiatedConnection {
+    pub fn new(value: ConnectionRequest, keys: &Keys) -> Result<Self, ConnectionRequest> {
+        let ConnectionRequest {
+            host: Some(host),
+            nick: Some(nick),
+            user: Some(user),
+            real_name: Some(real_name),
+            user_id: Some(user_id),
+            capabilities,
+        } = value
+        else {
+            return Err(value);
+        };
+
+        let cloak = sha2::Sha256::default()
+            .chain(host.ip().to_canonical().to_string())
+            .chain(keys.ip_salt)
+            .finalize_fixed();
+        let mut cloak = hex::encode(cloak);
+        cloak.truncate(12);
+
+        Ok(Self {
+            host,
+            resolved_host: None,
+            cloak: format!("cloaked-{cloak}"),
+            nick,
+            user,
+            mode: UserMode::empty(),
+            real_name,
+            user_id,
+            capabilities,
+            away: None,
+            at: Utc::now(),
+        })
+    }
+
     #[must_use]
     pub fn to_nick(&self) -> Prefix {
         Prefix::Nickname(
@@ -85,39 +121,6 @@ impl InitiatedConnection {
     }
 }
 
-impl TryFrom<ConnectionRequest> for InitiatedConnection {
-    type Error = ConnectionRequest;
-
-    fn try_from(value: ConnectionRequest) -> Result<Self, Self::Error> {
-        let ConnectionRequest {
-            host: Some(host),
-            resolved_host,
-            nick: Some(nick),
-            user: Some(user),
-            real_name: Some(real_name),
-            user_id: Some(user_id),
-            capabilities,
-        } = value
-        else {
-            return Err(value);
-        };
-
-        Ok(Self {
-            host,
-            resolved_host: resolved_host.clone(),
-            cloak: resolved_host.unwrap_or_else(|| "xxx".to_string()),
-            nick,
-            user,
-            mode: UserMode::empty(),
-            real_name,
-            user_id,
-            capabilities,
-            away: None,
-            at: Utc::now(),
-        })
-    }
-}
-
 /// Currently just awaits client preamble (nick, user), but can be expanded to negotiate
 /// capabilities with the client in the future.
 #[instrument(skip_all)]
@@ -128,6 +131,7 @@ pub async fn negotiate_client_connection(
     persistence: &Addr<Persistence>,
     database: sqlx::Pool<sqlx::Any>,
     resolver: &TokioAsyncResolver,
+    keys: &Keys,
 ) -> Result<Option<InitiatedConnection>, ProtocolError> {
     let mut request = ConnectionRequest {
         host: Some(host),
@@ -210,19 +214,7 @@ pub async fn negotiate_client_connection(
             }
         };
 
-        if let Ok(Ok(v)) = tokio::time::timeout(
-            Duration::from_millis(250),
-            resolver.reverse_lookup(host.ip()),
-        )
-        .await
-        {
-            request.resolved_host = v
-                .iter()
-                .next()
-                .map(|v| v.to_utf8().trim_end_matches('.').to_string());
-        }
-
-        match InitiatedConnection::try_from(std::mem::take(&mut request)) {
+        match InitiatedConnection::new(std::mem::take(&mut request), keys) {
             Ok(v) => break Some(v),
             Err(v) => {
                 // connection isn't fully initiated yet...
@@ -233,9 +225,21 @@ pub async fn negotiate_client_connection(
 
     // if the user closed the connection before the connection was fully established,
     // return back early
-    let Some(initiated) = initiated else {
+    let Some(mut initiated) = initiated else {
         return Ok(None);
     };
+
+    if let Ok(Ok(v)) = tokio::time::timeout(
+        Duration::from_millis(250),
+        resolver.reverse_lookup(host.ip().to_canonical()),
+    )
+    .await
+    {
+        initiated.resolved_host = v
+            .iter()
+            .next()
+            .map(|v| v.to_utf8().trim_end_matches('.').to_string());
+    }
 
     write
         .send(ConnectionSuccess(initiated.clone()).into_message())

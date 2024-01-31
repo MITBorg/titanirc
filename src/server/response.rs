@@ -92,8 +92,8 @@ impl IntoProtocol for Whois {
                     "is connecting from {}@{} {}",
                     conn.user,
                     conn.resolved_host
-                        .unwrap_or_else(|| conn.host.ip().to_string()),
-                    conn.host.ip()
+                        .unwrap_or_else(|| conn.host.ip().to_canonical().to_string()),
+                    conn.host.ip().to_canonical()
                 )
             ), // RPL_WHOISHOST
         ];

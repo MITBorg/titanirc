@@ -11,6 +11,7 @@ pub mod config;
 pub mod connection;
 pub mod database;
 pub mod host_mask;
+pub mod keys;
 pub mod messages;
 pub mod persistence;
 pub mod server;

@@ -1,3 +1,8 @@
+CREATE TABLE keys (
+    name VARCHAR(255) PRIMARY KEY,
+    enckey VARCHAR(255) NOT NULL
+);
+
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     username VARCHAR(255) NOT NULL,

@@ -17,8 +17,8 @@ use irc_proto::{Command, IrcCodec, Message};
 use rand::seq::SliceRandom;
 use sqlx::migrate::Migrator;
 use titanircd::{
-    client::Client, config::Args, connection, messages::UserConnected, persistence::Persistence,
-    server::Server,
+    client::Client, config::Args, connection, keys::Keys, messages::UserConnected,
+    persistence::Persistence, server::Server,
 };
 use tokio::{
     io::WriteHalf,
@@ -60,6 +60,8 @@ async fn main() -> anyhow::Result<()> {
 
     MIGRATOR.run(&database).await?;
 
+    let keys = Arc::new(Keys::new(&database).await?);
+
     let listen_address = opts.config.listen_address;
     let client_threads = opts.config.client_threads;
 
@@ -94,6 +96,7 @@ async fn main() -> anyhow::Result<()> {
         persistence_addr,
         server,
         client_threads,
+        keys,
     ));
 
     info!("Server listening on {}", listen_address);
@@ -112,6 +115,7 @@ async fn start_tcp_acceptor_loop(
     persistence: Addr<Persistence>,
     server: Addr<Server>,
     client_threads: usize,
+    keys: Arc<Keys>,
 ) {
     let client_arbiters = Arc::new(build_arbiters(client_threads));
     let resolver = Arc::new(AsyncResolver::tokio_from_system_conf().unwrap());
@@ -127,6 +131,7 @@ async fn start_tcp_acceptor_loop(
         let client_arbiters = client_arbiters.clone();
         let persistence = persistence.clone();
         let resolver = resolver.clone();
+        let keys = keys.clone();
 
         actix_rt::spawn(async move {
             // split the stream into its read and write halves and setup codecs
@@ -136,7 +141,7 @@ async fn start_tcp_acceptor_loop(
 
             // ensure we have all the details required to actually connect the client to the server
             // (ie. we have a nick, user, etc)
-            let connection = match connection::negotiate_client_connection(&mut read, &mut write, addr, &persistence, database, &resolver).await {
+            let connection = match connection::negotiate_client_connection(&mut read, &mut write, addr, &persistence, database, &resolver, &keys).await {
                 Ok(Some(v)) => v,
                 Ok(None) => {
                     error!("Failed to fully handshake with client, dropping connection");

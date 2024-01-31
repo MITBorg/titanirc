@@ -25,6 +25,16 @@ impl IntoProtocol for Whois {
                     ),
                 }
             };
+            ($response:literal, $($payload:expr),*) => {
+                Message {
+                    tags: None,
+                    prefix: Some(Prefix::ServerName(SERVER_NAME.to_string())),
+                    command: Command::Raw(
+                        format!("{:03}", $response),
+                        vec![for_user.to_string(), $($payload),*],
+                    ),
+                }
+            };
         }
 
         let Some(conn) = self.conn else {
@@ -42,11 +52,16 @@ impl IntoProtocol for Whois {
         // TODO: RPL_WHOISSECURE
         // TODO: fix missing rpl variants
         let mut out = vec![
-            // msg!(RPL_WHOISREGNICK, self.conn.nick.to_string(), "has identified for this nick".to_string()),
+            msg!(
+                307,
+                conn.nick.to_string(),
+                "has identified for this nick".to_string()
+            ), // RPL_WHOISREGNICK
             msg!(
                 RPL_WHOISUSER,
                 conn.nick.to_string(),
-                conn.user,
+                conn.user.to_string(),
+                conn.cloak,
                 "*".to_string(),
                 conn.real_name
             ),
@@ -64,10 +79,29 @@ impl IntoProtocol for Whois {
                 "seconds idle, signon time".to_string()
             ), // TODO
             msg!(RPL_WHOISCHANNELS, conn.nick.to_string(), channels),
-            // msg!(RPL_WHOISACCOUNT, self.conn.nick.to_string(), self.conn.user.to_string(), "is logged in as".to_string()),
-            // msg!(RPL_WHOISHOST, self.conn.nick.to_string(), format!("is connecting from {}@{} {}", self.conn.user, self.conn.host, self.conn.host)),
-            // msg!(RPL_WHOISMODES, self.conn.nick.to_string(), format!("is using modes {}", self.conn.mode)),
+            msg!(
+                330,
+                conn.nick.to_string(),
+                conn.user.to_string(),
+                "is logged in as".to_string()
+            ), // RPL_WHOISACCOUNT
+            msg!(
+                378,
+                conn.nick.to_string(),
+                format!(
+                    "is connecting from {}@{} {}",
+                    conn.user, conn.host, conn.host
+                )
+            ), // RPL_WHOISHOST
         ];
+
+        if !conn.mode.is_empty() {
+            out.push(msg!(
+                379,
+                conn.nick.to_string(),
+                format!("is using modes {}", conn.mode)
+            )); // RPL_WHOISMODES
+        }
 
         if let Some(msg) = conn.away {
             out.push(msg!(RPL_AWAY, conn.nick.to_string(), msg));

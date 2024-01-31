@@ -4,6 +4,7 @@ mod authenticate;
 pub mod sasl;
 
 use std::{
+    fmt::{Display, Formatter},
     io::{Error, ErrorKind},
     net::SocketAddr,
     str::FromStr,
@@ -98,7 +99,7 @@ impl TryFrom<ConnectionRequest> for InitiatedConnection {
 
         Ok(Self {
             host,
-            cloak: host.ip().to_string(),
+            cloak: format!("0{}", host.ip()),
             nick,
             user,
             mode: UserMode::empty(),
@@ -295,6 +296,22 @@ bitflags! {
         const WALLOPS        = 0b0000_0000_0000_0000_0000_0000_0000_0001;
         /// o - operator flag
         const OPER           = 0b0000_0000_0000_0000_0000_0000_0000_0010;
+    }
+}
+
+impl Display for UserMode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "+")?;
+
+        if self.contains(Self::WALLOPS) {
+            write!(f, "w")?;
+        }
+
+        if self.contains(Self::OPER) {
+            write!(f, "o")?;
+        }
+
+        Ok(())
     }
 }
 
